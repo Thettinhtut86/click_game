@@ -1,0 +1,12 @@
+<h2>Room {{roomId}}</h2>
+<div class="players">
+    <div *ngFor="let p of players" class="bubble" [style.background]="p.color">
+        {{ p.name }}
+    </div>
+</div>
+
+<div *ngIf="uid === hostId">
+    <button (click)="startGame()" [disabled]="players.length < 2">Start Game</button>
+</div>
+<p *ngIf="uid !== hostId">Waiting for host to start...</p>
+<button (click)="back()">Back to Menu</button>

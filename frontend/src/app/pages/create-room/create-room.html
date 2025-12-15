@@ -1,0 +1,16 @@
+<h2>Create Room</h2>
+
+<div class="form-group">
+    <label>
+        Game Order:
+        <select [(ngModel)]="option">
+            <option value="asc">1 → 100</option>
+            <!-- <option value="desc">100 → 1</option> -->
+        </select>
+    </label>
+</div>
+
+<div class="buttons">
+    <button class="create-btn" (click)="createRoom()">Create</button>
+    <button class="back-btn" (click)="back()">Back</button>
+</div>

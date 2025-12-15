@@ -1,0 +1,24 @@
+<h2 class="title">Available Rooms</h2>
+
+<div *ngIf="loading" class="loading">
+    Loading rooms...
+</div>
+
+<div *ngIf="!loading && rooms.length === 0" class="no-rooms">
+    No rooms available. Please wait or create one.
+</div>
+
+<div class="room-list">
+    <div *ngFor="let room of rooms" class="room-card">
+        <div class="room-info">
+            <span class="room-id">Room ID: {{ room.id }}</span>
+            <span class="room-host">Host: {{ room.host_name }}</span>
+            <span class="room-players">Players: {{ room.player_count }}/4</span>
+        </div>
+        <button class="join-btn" (click)="join(room.id)" [disabled]="room.player_count >= 4">
+            Join
+        </button>
+    </div>
+</div>
+
+<button class="back-btn" (click)="back()">Back</button>

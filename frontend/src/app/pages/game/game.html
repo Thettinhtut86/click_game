@@ -1,0 +1,42 @@
+<div class="game-container">
+    <!-- <div class="sidebar">
+        <h3>Watchers</h3>
+        <div class="watcher" *ngFor="let w of watchers">
+            <div class="watcher-bubble" [style.background]="w.color"></div>
+            <span>{{ w.name }}</span>
+        </div>
+    </div> -->
+
+    <div class="main-content">
+        <div class="header">
+            <div class="players-container">
+                <div *ngFor="let p of players" class="player-info">
+                    <div class="player-bubble" [style.background]="p.color"></div>
+                    <span class="player-name">{{ p.name }}</span>
+                    <span class="player-score">{{ scores[p.id] || 0 }}</span>
+                </div>
+            </div>
+
+            <div class="current-number" *ngIf="gameStarted && playOrder.length">
+                Next: <span class="bubble-number">{{ playOrder[indexInOrder] }}</span>
+            </div>
+
+            <button class="quit-btn" (click)="quitGame()">Quit Game</button>
+        </div>
+
+        <div class="grid-container">
+            <div class="grid">
+                <div *ngIf="!displayOrder || displayOrder.length === 0" class="no-bubbles">
+                    Waiting for game to start or no bubbles received...
+                </div>
+
+                <div *ngFor="let n of displayOrder" class="bubble" [style.background]="bubbleColor('B' + n)"
+                    [style.color]="bubbleTextColor('B' + n)"
+                    [style.border-color]="bubbles['B' + n] ? bubbleColor('B' + n) : '#ccc'"
+                    (click)="selectBubble('B' + n)">
+                    {{ n }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,18 @@
+.chat-box {
+    max-height: 20em;
+    overflow-y: auto;
+    border: 1px solid #ccc;
+    padding: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+input {
+    width: 70%;
+    padding: 0.5em;
+}
+
+button {
+    padding: 0.5em 1em;
+    cursor: pointer;
+    margin-top: 0.5em;
+}

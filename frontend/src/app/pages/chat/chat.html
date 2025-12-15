@@ -1,0 +1,9 @@
+<h3>All Chat</h3>
+<div class="chat-box">
+    <div *ngFor="let msg of messages">
+        <b>{{msg.name}}:</b> {{msg.text}}
+    </div>
+</div>
+<input [(ngModel)]="chatText" placeholder="Type message" />
+<button (click)="sendMessage()">Send</button>
+<button (click)="back()">Back to Menu</button>
