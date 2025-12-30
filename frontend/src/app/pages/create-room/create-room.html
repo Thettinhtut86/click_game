@@ -1,16 +1,44 @@
-<h2>Create Room</h2>
+<div class="page-wrapper">
+  <div class="stripe stripe-1"></div>
+  <div class="stripe stripe-2"></div>
+  <div class="stripe stripe-3"></div>
+  <div class="card">
+    <header class="card-header">
+      <h2>Create Room</h2>
+      <p class="subtitle">Configure game settings before starting</p>
+    </header>
 
-<div class="form-group">
-    <label>
-        Game Order:
-        <select [(ngModel)]="option">
-            <option value="asc">1 → 100</option>
-            <!-- <option value="desc">100 → 1</option> -->
+    <section class="card-body">
+      <div class="form-group">
+        <label for="order">Game Order</label>
+
+        <select id="order" [(ngModel)]="option" aria-label="Game Order">
+          <option value="asc">1 → 100 (Ascending)</option>
+          <!-- <option value="desc">100 → 1 (Descending)</option> -->
         </select>
-    </label>
-</div>
+      </div>
+    </section>
 
-<div class="buttons">
-    <button class="create-btn" (click)="createRoom()">Create</button>
-    <button class="back-btn" (click)="back()">Back</button>
+    <footer class="card-footer">
+      <button
+        class="btn primary"
+        (click)="createRoom()"
+        (mouseenter)="onBtnEnter($event)"
+        (mousemove)="onBtnMove($event)"
+        (mouseleave)="resetLight($event)"
+      >
+        Create Room
+      </button>
+
+      <button
+        class="btn danger"
+        (click)="back()"
+        (mouseenter)="onBtnEnter($event)"
+        (mousemove)="onBtnMove($event)"
+        (mouseleave)="resetLight($event)"
+      >
+        Back
+      </button>
+    </footer>
+  </div>
 </div>
