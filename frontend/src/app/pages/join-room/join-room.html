@@ -1,24 +1,48 @@
-<h2 class="title">Available Rooms</h2>
+<div class="page-wrapper">
+    <div class="stripe stripe-1"></div>
+    <div class="stripe stripe-2"></div>
+    <div class="stripe stripe-3"></div>
 
-<div *ngIf="loading" class="loading">
-    Loading rooms...
-</div>
+    <div class="card rectangle-glass">
+        <header class="glass-header">
+            <div class="header-content">
+                <h2>Available Rooms</h2>
+                <div class="live-indicator">
+                    <span class="dot"></span> LIVE
+                </div>
+            </div>
+            <p class="subtitle">Select a lobby to join the match</p>
+        </header>
 
-<div *ngIf="!loading && rooms.length === 0" class="no-rooms">
-    No rooms available. Please wait or create one.
-</div>
+        <section class="card-body">
+            <div *ngIf="loading" class="loading-container">
+                <div class="rect-spinner"></div>
+                <p class="loading-text">SYNCING LOBBIES...</p>
+            </div>
 
-<div class="room-list">
-    <div *ngFor="let room of rooms" class="room-card">
-        <div class="room-info">
-            <span class="room-id">Room ID: {{ room.id }}</span>
-            <span class="room-host">Host: {{ room.host_name }}</span>
-            <span class="room-players">Players: {{ room.player_count }}/4</span>
-        </div>
-        <button class="join-btn" (click)="join(room.id)" [disabled]="room.player_count >= 4">
-            Join
-        </button>
+            <div *ngIf="!loading && rooms.length === 0" class="no-rooms">
+                <p>No active rooms found.</p>
+            </div>
+
+            <div class="room-grid" *ngIf="!loading && rooms.length > 0">
+                <div *ngFor="let room of rooms" class="room-item">
+                    <div class="room-info">
+                        <span class="room-id">ROOM #{{ room.id }}</span>
+                        <span class="room-host">{{ room.host_name }}</span>
+                    </div>
+                    <div class="room-actions">
+                        <span class="player-tag">{{ room.player_count }}/4</span>
+                        <button class="btn primary join-mini-btn" (click)="join(room.id)"
+                            [disabled]="room.player_count >= 4">
+                            JOIN
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="glass-footer">
+            <button class="btn danger-outline" (click)="back()">BACK TO MENU</button>
+        </footer>
     </div>
 </div>
-
-<button class="back-btn" (click)="back()">Back</button>

@@ -1,100 +1,256 @@
-.title {
-    text-align: center;
-    font-size: 1.5rem;
-    margin-bottom: 1.25rem;
+/* ---------- LAYER 1: BASE (unchanged) ---------- */
+.page-wrapper {
+    position: relative;
+    min-height: 100vh;
+    width: 100%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #dadada;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
 }
 
-.no-rooms {
-    text-align: center;
-    font-style: italic;
+/* ---------- LAYER 2: STRIPES (unchanged) ---------- */
+.stripe {
+    position: absolute;
+    inset: -50%;
+    width: 180%;
+    height: 200%;
+    transform: rotate(45deg);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.stripe-1 {
+    background: linear-gradient(135deg, #ff6b6b, #ff4757);
+    clip-path: polygon(0 0, 40% 0, 40% 100%, 0 100%);
+}
+
+.stripe-2 {
+    background: linear-gradient(135deg, #1dd1a1, #10ac84);
+    clip-path: polygon(42% 0, 58% 0, 58% 100%, 42% 100%);
+}
+
+.stripe-3 {
+    background: linear-gradient(135deg, #54a0ff, #2e86de);
+    clip-path: polygon(60% 0, 100% 0, 100% 100%, 60% 100%);
+}
+
+/* ---------- LAYER 3: ROUND GLASS CARD (Updated) ---------- */
+.rectangle-glass {
+    position: relative;
+    z-index: 10;
+    width: 90%;
+    max-width: 500px;
+
+    /* Glass Effect */
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+
+    /* ✅ UPDATE 1: Set a large border-radius for roundness */
+    border-radius: 2rem;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+
+    overflow: hidden;
+    animation: cardSlide 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Header (Removed solid gray background) */
+.glass-header {
+    padding: 2rem 2.5rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-header h2 {
+    font-size: 1.6rem;
+    color: #111;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Live Indicator */
+.live-indicator {
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #ff4757;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dot {
+    width: 8px;
+    height: 8px;
+    background: #ff4757;
+    border-radius: 50%;
+    animation: blink 1s infinite;
+}
+
+/* Room Items */
+.card-body {
+    padding: 1.5rem 2.5rem;
+}
+
+.room-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 350px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.room-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.3);
+    padding: 1.2rem;
+
+    /* ✅ UPDATE 2: Match the room items with round borders */
+    border-radius: 1rem;
+
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.room-item:hover {
+    background: rgba(255, 255, 255, 0.6);
+
+    /* Removed industrial accent - doesn't fit round design */
+    transform: scale(1.02);
+}
+
+.room-id {
+    font-size: 0.7rem;
+    font-weight: 900;
     color: #666;
 }
 
-.room-list {
+.room-host {
+    font-weight: 700;
+    color: #111;
+    display: block;
+    font-size: 1.05rem;
+}
+
+.player-tag {
+    font-family: monospace;
+    font-weight: 700;
+    color: #111;
+    padding-right: 10px;
+    font-size: 0.9rem;
+}
+
+/* Buttons (Removed solid gray background) */
+.glass-footer {
+    padding: 1.5rem 2.5rem 2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
     display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-    justify-content: center;
-    margin-bottom: 1.25rem;
 }
 
-.room-card {
-    background-color: #f9f9f9;
-    border: 0.0625rem solid #ddd;
-    border-radius: 0.75rem;
-    padding: 1rem 1.25rem;
-    width: 13.75rem;
-    /* ~220px */
-    text-align: center;
-    box-shadow: 0 0.125rem 0.375rem rgba(0, 0, 0, 0.1);
-    transition: transform 0.2s, box-shadow 0.2s;
+.btn {
+    width: 100%;
+    padding: 0.9rem;
+
+    /* ✅ UPDATE 3: Match the buttons with round borders */
+    border-radius: 0.8rem;
+
+    border: none;
+    font-weight: 800;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: 0.2s;
 }
 
-.room-card:hover {
-    transform: translateY(-0.1875rem);
-    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.15);
+.btn.primary {
+    background: #111;
+    color: white;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
 }
 
-.room-info {
-    margin-bottom: 0.625rem;
+.btn.primary:hover {
+    background: #43a047;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(67, 160, 71, 0.3);
+}
+
+.danger-outline {
+    background: transparent;
+    border: 1px solid #ff4757;
+    color: #ff4757;
+}
+
+.danger-outline:hover {
+    background: #ff4757;
+    color: white;
+}
+
+/* Spinner */
+.loading-container {
     display: flex;
     flex-direction: column;
-    gap: 0.3125rem;
-    font-size: 0.875rem;
+    align-items: center;
+    padding: 3rem;
 }
 
-.join-btn {
-    background-color: #4CAF50;
-    color: white;
-    border: none;
-    border-radius: 0.5rem;
-    padding: 0.375rem 0.75rem;
-    
-    font-weight: 600;
+.rect-spinner {
+    width: 45px;
+    height: 45px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top: 4px solid #111;
+    border-radius: 50%;
+
+    animation: spin 0.8s linear infinite;
 }
 
-.join-btn:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
-}
-
-.back-btn {
-    display: block;
-    margin: 0 auto;
-    background-color: #f44336;
-    color: white;
-    border: none;
-    border-radius: 0.5rem;
-    padding: 0.5rem 1rem;
-    cursor: inherit !important;
-    font-weight: 600;
-}
-
-.back-btn:hover {
-    background-color: #d32f2f;
-    /* slightly darker red */
-    transform: translateY(-0.1rem);
-    box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.2);
-}
-
-.loading {
-    text-align: center;
-    font-size: 1rem;
-    font-weight: 600;
-    color: #555;
-    animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-    0% {
-        opacity: 0.4;
+/* Animations (unchanged) */
+@keyframes spin {
+    100% {
+        transform: rotate(360deg);
     }
+}
 
-    50% {
+@keyframes blink {
+
+    0%,
+    100% {
         opacity: 1;
     }
 
-    100% {
-        opacity: 0.4;
+    50% {
+        opacity: 0.3;
     }
+}
+
+@keyframes cardSlide {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Scrollbar (unchanged) */
+.room-grid::-webkit-scrollbar {
+    width: 4px;
+}
+
+.room-grid::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 10px;
 }
