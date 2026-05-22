@@ -1,77 +1,116 @@
 import { Injectable } from '@angular/core';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
-import { BehaviorSubject } from 'rxjs';
+import { Subject } from 'rxjs';
 
 @Injectable({
   providedIn: 'root'
 })
 export class WebSocket {
-  private socket!: WebSocketSubject<any>;
-  public messages$ = new BehaviorSubject<any[]>([]);
-  private isConnected = false;
-  private userId!: string;
-  private userName!: string;
 
-  connect( userName: string) {
+  private socket!: WebSocketSubject<any>;
+  private isConnected = false;
+
+  private userName!: string;
+  private userId!: string;
+  public currentGameState: any = null;
+  // SINGLE STREAM
+  public messages$ = new Subject<any>();
+
+  connect(userName: string, userId?: string) {
+
+    if (this.isConnected) return;
 
     this.userName = userName;
-    const url = `ws://192.168.250.1:8080/ws/${userName}`;
+    this.userId = userId || '';
 
     this.socket = webSocket({
-      url,
-      serializer: (data:any)=>JSON.stringify(data),
-      deserializer: ({data}) => JSON.parse(data)
+      url: `ws://192.168.250.1:8000/ws/${userName}`,
+      serializer: (msg: any) => JSON.stringify(msg),
+      deserializer: ({ data }) => JSON.parse(data)
     });
 
     this.socket.subscribe({
-      next: (msg:any) => this.handleMessage(msg),
-      error: err => { console.error('WS Error:', err); this.isConnected=false; },
-      complete: () => { console.log('WS Closed'); this.isConnected=false; }
+      next: (msg) => {
+        if (msg.action === 'game_started') {
+          this.currentGameState = msg;
+  }
+        this.messages$.next(msg);
+      },
+
+      error: (err) => {
+        console.error('WS ERROR', err);
+        this.isConnected = false;
+
+        this.isConnected = false;
+        setTimeout(() => {
+          if (!this.isConnected) {
+            this.connect(this.userName, this.userId);
+          }
+        }, 2000);
+      },
+
+      complete: () => {
+        this.isConnected = false;
+      }
     });
 
     this.isConnected = true;
 
-    // Send handshake
-    setTimeout(()=>this.send({action:'handshake', userName}), 100);
+    setTimeout(() => {
+      this.send({
+        action: 'handshake',
+        userName
+      });
+    }, 100);
   }
 
-  private handleMessage(msg: any) {
-    // Append to message stream
-    const current = Array.isArray(this.messages$.value) ? this.messages$.value : [];
-    this.messages$.next([...current, msg]);
+send(data: any) {
+  if (!this.isConnected || !this.socket) {
+    console.warn("WS not ready, dropping:", data);
+    return;
   }
-
-  send(message: any) {
-    if(!this.isConnected) {
-      console.error('WS not connected');
-      return;
-    }
-    this.socket.next(message);
-  }
+  this.socket.next(data);
+}
 
   disconnect() {
-    this.isConnected=false;
-    if(this.socket) this.socket.complete();
+    this.isConnected = false;
+    this.socket?.complete();
   }
 
-  // Convenience actions
-  createRoom(roomId:string, option:'asc'|'desc'='asc') {
-    this.send({action:'create_room', roomId, option});
+  createRoom(roomId: string, option: 'asc' | 'desc' = 'asc') {
+    this.send({
+      action: 'create_room',
+      roomId,
+      option
+    });
   }
 
-  joinRoom(roomId:string) {
-    this.send({action:'join_room', roomId, uid:this.userId, name:this.userName});
+  joinRoom(roomId: string) {
+    this.send({
+      action: 'join_room',
+      roomId
+    });
   }
 
-  leaveRoom(roomId:string) {
-    this.send({action:'leave_room', roomId, uid:this.userId});
+  leaveRoom(roomId: string) {
+    this.send({
+      action: 'leave_room',
+      roomId
+    });
   }
 
-  startGame(roomId:string) {
-    this.send({action:'start_game', roomId});
+  startGame(roomId: string) {
+    this.send({
+      action: 'start_game',
+      roomId
+    });
   }
 
-  selectBubble(roomId:string, bubbleId:string) {
-    this.send({action:'select_bubble', roomId, bubble_id:bubbleId, uid:this.userId});
+  selectBubble(roomId: string, bubbleId: string) {
+    this.send({
+      action: 'select_bubble',
+      roomId,
+      bubble_id: bubbleId
+    });
   }
 }

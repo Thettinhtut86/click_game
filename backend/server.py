@@ -8,9 +8,9 @@ from mysql.connector import Error
 from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, Body
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
-from typing import Dict
+from typing import Dict, Optional
 
-
+# ---------- Configuration ----------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("bubble-game")
 
@@ -18,7 +18,7 @@ DB_CONFIG = {
     "host": "localhost",
     "user": "root",
     "password": "root",
-    "database": "live_game"   # adjust DB name
+    "database": "live_game"
 }
 
 PLAYER_COLORS = [
@@ -27,6 +27,7 @@ PLAYER_COLORS = [
     "#1d0a0a", "#fabebe", "#008080", "#2600ff"
 ]
 
+# ---------- FastAPI Setup ----------
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -36,26 +37,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory state
-rooms_state: Dict[str, dict] = {}  # roomId -> { host, players: [{id,name,color}], option, game_started, bubbles }
-connected_clients: Dict[str, WebSocket] = {}  # player_id -> websocket
+# ---------- In-Memory State ----------
+rooms_state: Dict[str, dict] = {}
+connected_clients: Dict[str, WebSocket] = {}
 
-# ---------- DB helper ----------
+# ---------- Database Helper ----------
 def execute(query: str, params: tuple = None, fetch: bool = False, dictionary: bool = False, commit: bool = False):
     conn = None
     cursor = None
-    result = None
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor(dictionary=dictionary)
         cursor.execute(query, params or ())
         if commit:
             conn.commit()
+            return cursor.lastrowid
         if fetch:
             return cursor.fetchall()
-        elif commit:
-            conn.commit()
-            result = cursor.lastrowid
     except Error as e:
         logger.error("DB Error: %s", e)
         raise
@@ -64,734 +62,711 @@ def execute(query: str, params: tuple = None, fetch: bool = False, dictionary: b
             cursor.close()
         if conn:
             conn.close()
-    return result
 
-# ---------- Startup: load rooms from DB ----------
+def serialize_player(p: dict) -> dict:
+    return {
+        "id": str(p["id"]),
+        "name": p.get("name"),
+        "color": p.get("color")
+    }            
+
+# ---------- Utility Functions ----------
+def norm_id(x) -> str:
+    return str(x)
+
+def ensure_room(room: dict) -> dict:
+    room.setdefault("players", [])
+    room.setdefault("watchers", [])
+    room.setdefault("bubbles", {})
+    room.setdefault("game_started", False)
+    room.setdefault("option", "asc")
+    room.setdefault("host", None)
+    room.setdefault("index", 0)
+    room.setdefault("play_order", [])
+    room.setdefault("display_order", [])
+    room["players"] = [
+        {
+            "id": str(p.get("id")),
+            "name": p.get("name"),
+            "color": p.get("color")
+        }
+        for p in room["players"]
+    ]
+    if not room["host"] and room["players"]:
+        room["host"] = room["players"][0]["id"]
+    return room
+
+def get_player_color(player: dict, room: dict, uid: str) -> str:
+    """Assign or retrieve player color."""
+    if player.get("color"):
+        return player["color"]
+    
+    try:
+        row = execute("SELECT color FROM players WHERE id=%s", (uid,), fetch=True, dictionary=True)
+        if row and row[0].get("color"):
+            player["color"] = row[0]["color"]
+            return player["color"]
+    except Exception:
+        logger.exception("Failed to fetch player color")
+    
+    used_colors = {p["color"] for p in room["players"] if p.get("color")}
+    available_colors = [c for c in PLAYER_COLORS if c not in used_colors]
+    color = available_colors[0] if available_colors else "#000000"
+    player["color"] = color
+    
+    try:
+        execute("UPDATE players SET color=%s WHERE id=%s", (color, uid), commit=True)
+    except Exception:
+        logger.exception("Failed to save player color")
+    
+    return color
+
+# ---------- Broadcast Functions ----------
+async def broadcast_to_all(message: dict):
+    """Send message to all connected clients."""
+    for ws in connected_clients.values():
+        try:
+            await ws.send_text(json.dumps(message))
+        except Exception:
+            pass
+
+async def broadcast_to_room(room_id: str, message: dict):
+    """Send message to all players in a specific room."""
+    room = rooms_state.get(str(room_id))
+    if not room:
+        return
+    
+    for player in room["players"]:
+        ws = connected_clients.get(str(player["id"]))
+        if ws:
+            try:
+                await ws.send_text(json.dumps(message))
+            except Exception:
+                pass
+    
+    # Also broadcast to watchers
+    for watcher in room.get("watchers", []):
+        ws = connected_clients.get(str(watcher["id"]))
+        if ws:
+            try:
+                await ws.send_text(json.dumps(message))
+            except Exception:
+                pass
+
+async def broadcast_rooms():
+    """Broadcast room list update to all clients."""
+    try:
+        rooms = execute(
+            """SELECT r.id, r.host_id, r.created_at, COUNT(p.id) AS player_count
+               FROM rooms r LEFT JOIN players p ON r.id = p.room_id
+               GROUP BY r.id""",
+            fetch=True, dictionary=True
+        ) or []
+    except Exception as e:
+        logger.exception("Failed to fetch rooms: %s", e)
+        rooms = []
+    
+    await broadcast_to_all({"action": "rooms_update", "rooms": rooms})
+
+async def broadcast_room_update(room_id: str):
+    """Broadcast updated room state to all connected clients."""
+    state = rooms_state.get(str(room_id))
+    if not state:
+        return
+    
+    message = {
+        "action": "room_update",
+        "roomId": str(room_id),
+        "players": [serialize_player(p) for p in state.get("players", [])],
+        "watchers": state.get("watchers", []),
+        "hostId": str(state.get("host")) if state.get("host") else None
+    }
+    await broadcast_to_all(message)
+
+# ---------- Room Management ----------
+async def remove_player_from_room(player_id: str, room_id: str = None):
+    """Remove player from room(s) and update database."""
+    target_rooms = [str(room_id)] if room_id else list(rooms_state.keys())
+    
+    for rid in target_rooms:
+        if rid in rooms_state:
+            room = rooms_state[rid]
+            room["players"] = [p for p in room["players"] if str(p["id"]) != str(player_id)]
+            room["watchers"] = [w for w in room.get("watchers", []) if str(w["id"]) != str(player_id)]
+            
+            if not room["players"] and not room.get("watchers"):
+                rooms_state.pop(rid, None)
+                try:
+                    execute("DELETE FROM rooms WHERE id=%s", (rid,), commit=True)
+                except Exception:
+                    logger.exception("Failed to delete empty room")
+            else:
+                await broadcast_room_update(rid)
+    
+    try:
+        execute("UPDATE players SET room_id=NULL WHERE id=%s", (player_id,), commit=True)
+    except Exception:
+        logger.exception("Failed to clear player's room assignment")
+
+async def close_room(room_id: str, reason: str = "Host has quit. Room closed."):
+    """Close a room and notify all players."""
+    room = rooms_state.get(room_id)
+    if not room:
+        return
+    
+    message = {"action": "room_closed", "roomId": room_id, "message": reason}
+    
+    for player in room["players"]:
+        ws = connected_clients.get(str(player["id"]))
+        if ws:
+            try:
+                await ws.send_text(json.dumps(message))
+            except Exception:
+                pass
+    
+    for watcher in room.get("watchers", []):
+        ws = connected_clients.get(str(watcher["id"]))
+        if ws:
+            try:
+                await ws.send_text(json.dumps(message))
+            except Exception:
+                pass
+    
+    try:
+        execute("DELETE FROM rooms WHERE id=%s", (room_id,), commit=True)
+        execute("UPDATE players SET room_id=NULL WHERE room_id=%s", (room_id,), commit=True)
+    except Exception:
+        logger.exception("Failed to delete room from database")
+    
+    rooms_state.pop(room_id, None)
+    await broadcast_rooms()
+
+# ---------- Game Logic ----------
+def generate_bubble_order(option: str = "asc") -> list:
+    """Generate randomized bubble order for game."""
+    numbers = list(range(1, 101))
+    random.shuffle(numbers)
+    return numbers
+
+async def handle_game_end(room_id: str):
+    """Handle end of game scoring and winner determination."""
+    room = rooms_state.get(room_id)
+    if not room:
+        return
+    
+    scores = {}
+    for bubble_owner in room["bubbles"].values():
+        if bubble_owner:
+            pid = bubble_owner["uid"]
+            scores[pid] = scores.get(pid, 0) + 1
+    
+    max_score = max(scores.values()) if scores else 0
+    winners = [pid for pid, score in scores.items() if score == max_score]
+    
+    winner_players = [
+        p for p in room["players"] 
+        if str(p["id"]) in winners
+    ]
+    
+    await broadcast_to_room(room_id, {
+        "action": "end_game",
+        "roomId": room_id,
+        "winners": winner_players,
+        "is_tie": len(winners) > 1,
+        "scores": scores
+    })
+    
+    winner_ids = ",".join(winners) if len(winners) > 1 else winners[0] if winners else None
+    try:
+        execute("UPDATE rooms SET winner_id=%s, started=0 WHERE id=%s", (winner_ids, room_id), commit=True)
+    except Exception:
+        logger.exception("Failed to update winner")
+    
+    rooms_state.pop(room_id, None)
+    await broadcast_rooms()
+
+# ---------- WebSocket Handlers ----------
+async def handle_handshake(ws: WebSocket, uid: str, name: str):
+    """Handle WebSocket handshake."""
+    await ws.send_text(json.dumps({
+        "action": "handshake_ack",
+        "status": "connected",
+        "userId": uid,
+        "userName": name
+    }))
+
+async def handle_create_room(ws: WebSocket, uid: str, name: str, data: dict):
+    """Handle room creation via WebSocket."""
+    try:
+        room_id = str(execute(
+            "INSERT INTO rooms (host_id, created_at) VALUES (%s, NOW())",
+            (uid,), commit=True
+        ))
+        
+        execute("UPDATE players SET room_id=%s WHERE id=%s", (room_id, uid), commit=True)
+        
+        # Get player info from database
+        player_row = execute("SELECT name, color FROM players WHERE id=%s", (uid,), fetch=True, dictionary=True)
+        player_info = {"id": uid, "name": name, "color": player_row[0]["color"] if player_row else None}
+        
+        rooms_state[room_id] = ensure_room({
+            "host": uid,
+            "players": [player_info],
+            "option": data.get("option", "asc")
+        })
+        
+        await ws.send_text(json.dumps({
+            "action": "room_created",
+            "roomId": room_id,
+            "hostId": uid
+        }))
+        
+        await broadcast_rooms()
+        await broadcast_room_update(room_id)
+        
+    except Exception as e:
+        logger.exception("Failed to create room: %s", e)
+        await ws.send_text(json.dumps({"action": "error", "message": "Failed to create room"}))
+
+async def handle_join_room(ws: WebSocket, uid: str, name: str, data: dict):
+    """Handle player joining a room."""
+    room_id = str(data.get("roomId"))
+    
+    if not room_id:
+        await ws.send_text(json.dumps({"action": "error", "message": "roomId required"}))
+        return
+    
+    # Load room from DB if not in memory
+    if room_id not in rooms_state:
+        row = execute("SELECT host_id FROM rooms WHERE id=%s", (room_id,), fetch=True, dictionary=True)
+        if not row:
+            await ws.send_text(json.dumps({"action": "error", "message": "Room not found"}))
+            return
+        
+        players = execute(
+            "SELECT id, name, color FROM players WHERE room_id=%s",
+            (room_id,), fetch=True, dictionary=True
+        ) or []
+        
+        rooms_state[room_id] = ensure_room({
+            "host": str(row[0]["host_id"]),
+            "players": players,
+            "watchers": []
+        })
+    
+    room = ensure_room(rooms_state[room_id])
+    
+    if room["game_started"]:
+        await ws.send_text(json.dumps({"action": "error", "message": "Game already started"}))
+        return
+    
+    # Check if player is already in room
+    if any(str(p["id"]) == str(uid) for p in room["players"]):
+        await ws.send_text(json.dumps({"action": "join_ack", "roomId": room_id}))
+        await broadcast_room_update(room_id)
+        return
+    
+    # Add as watcher if room is full (max 4 players)
+    if len(room["players"]) >= 4:
+        room["watchers"].append({"id": uid, "name": name})
+        await ws.send_text(json.dumps({"action": "watcher_joined", "roomId": room_id}))
+        await broadcast_room_update(room_id)
+        return
+    
+    # Add player to room
+    execute("UPDATE players SET room_id=%s WHERE id=%s", (room_id, uid), commit=True)
+    
+    # Get player color
+    player_row = execute("SELECT color FROM players WHERE id=%s", (uid,), fetch=True, dictionary=True)
+    player_info = {
+        "id": uid, 
+        "name": name, 
+        "color": player_row[0]["color"] if player_row else None
+    }
+    room["players"].append(serialize_player(player_info))
+    
+    await ws.send_text(json.dumps({"action": "join_ack", "roomId": room_id}))
+    await broadcast_room_update(room_id)
+    await broadcast_rooms()
+
+async def handle_leave_room(ws: WebSocket, uid: str, data: dict):
+    """Handle player leaving a room."""
+    room_id = str(data.get("roomId"))
+    
+    if not room_id:
+        await ws.send_text(json.dumps({"action": "error", "message": "roomId required"}))
+        return
+    
+    room = rooms_state.get(room_id)
+    
+    if not room:
+        return
+    
+    if room.get("game_started"):
+        logger.info("Ignoring leave_room during active game")
+        return
+    
+    await remove_player_from_room(uid, room_id)
+    await ws.send_text(json.dumps({"action": "leave_ack", "roomId": room_id}))
+    await broadcast_rooms()
+
+async def handle_start_game(ws: WebSocket, uid: str, data: dict):
+    """Handle starting a game."""
+    room_id = str(data.get("roomId"))
+    
+    if not room_id:
+        await ws.send_text(json.dumps({"action": "error", "message": "roomId required"}))
+        return
+    
+    room = rooms_state.get(room_id)
+    if not room:
+        await ws.send_text(json.dumps({"action": "error", "message": "Room not found"}))
+        return
+    
+    # Only host can start game
+    if str(uid) != str(room.get("host")):
+        await ws.send_text(json.dumps({"action": "error", "message": "Only host can start the game"}))
+        return
+    
+    # Generate bubble order
+    displayOrder = generate_bubble_order()
+
+    if room.get("option") == "desc":
+        play_order = list(range(100, 0, -1))
+    else:
+        play_order = list(range(1, 101))
+    room["play_order"] = play_order
+    room["display_order"] = displayOrder
+    room["index"] = 0
+    room["game_started"] = True
+    room["bubbles"] = {f"B{i}": None for i in displayOrder}
+
+    # Update database
+    try:
+        execute("UPDATE rooms SET started=1 WHERE id=%s", (room_id,), commit=True)
+    except Exception:
+        logger.exception("Failed to update room started status")
+    
+    await broadcast_to_room(room_id, {
+        "action": "game_started",
+        "roomId": room_id,
+        "bubbles": room["bubbles"],
+        "players": room["players"],
+        "play_order": room["play_order"],
+        "display_order": room["display_order"],
+        "option": room["option"]
+    })
+
+async def handle_quit_room(ws: WebSocket, uid: str, data: dict):
+    """Handle player quitting a room."""
+    room_id = str(data.get("roomId") or data.get("room_id"))
+    
+    if not room_id:
+        await ws.send_text(json.dumps({"action": "error", "message": "roomId required"}))
+        return
+    
+    room = rooms_state.get(room_id)
+    if not room:
+        await ws.send_text(json.dumps({"action": "error", "message": "Room not found"}))
+        return
+    
+    # If host quits, close entire room
+    if str(uid) == str(room.get("host")):
+        await close_room(room_id)
+        return
+    
+    # Remove player from room
+    await remove_player_from_room(uid, room_id)
+    await broadcast_rooms()
+    await ws.send_text(json.dumps({"action": "quit_ack", "roomId": room_id}))
+
+async def handle_select_bubble(ws: WebSocket, uid: str, data: dict):
+    """Handle bubble selection during gameplay."""
+    room_id = str(data.get("roomId") or data.get("room_id"))
+    bubble_id = data.get("bubble_id")
+    
+    if not room_id or not bubble_id:
+        await ws.send_text(json.dumps({"action": "error", "message": "roomId and bubble_id required"}))
+        return
+    
+    room = rooms_state.get(room_id)
+    if not room or not room.get("game_started"):
+        await ws.send_text(json.dumps({"action": "error", "message": "Game not started or room not found"}))
+        return
+    
+    # Validate correct bubble selection
+    if room["index"] >= len(room["play_order"]):
+        await ws.send_text(json.dumps({"action": "error", "message": "Game is over"}))
+        return
+    
+    expected_label = f"B{room['play_order'][room['index']]}"
+    if bubble_id != expected_label:
+        await ws.send_text(json.dumps({
+            "action": "error",
+            "message": f"You must click {expected_label} next!"
+        }))
+        return
+    
+    # Ensure player exists in room
+    player = next((p for p in room["players"] if str(p["id"]) == str(uid)), None)
+    if not player:
+        player = {"id": uid, "name": data.get("name", "Unknown"), "color": None}
+        room["players"].append(player)
+    
+    # Assign player color
+    player["color"] = get_player_color(player, room, uid)
+    
+    # Claim bubble
+    room["bubbles"][bubble_id] = {"uid": uid, "color": player["color"]}
+    room["index"] += 1
+    
+    # Broadcast bubble update
+    await broadcast_to_room(room_id, {
+        "action": "update_bubbles",
+        "roomId": room_id,
+        "bubbles": room["bubbles"],
+        "currentIndex": room["index"]
+    })
+    
+    # Check if game is complete
+    if room["index"] >= len(room["play_order"]):
+        await handle_game_end(room_id)
+
+async def handle_ws_action(ws: WebSocket, player_id: str, player_name: str, data: dict):
+    """Route WebSocket actions to appropriate handlers."""
+    action = data.get("action")
+    uid = data.get("uid") or player_id
+    name = data.get("name") or player_name
+    
+    logger.info("WS action=%s from=%s", action, uid)
+    
+    if action == "handshake":
+        await handle_handshake(ws, uid, name)
+    elif action == "create_room":
+        await handle_create_room(ws, uid, name, data)
+    elif action == "join_room":
+        await handle_join_room(ws, uid, name, data)
+    elif action == "leave_room":
+        await handle_leave_room(ws, uid, data)
+    elif action == "start_game":
+        await handle_start_game(ws, uid, data)
+    elif action == "quit_room":
+        await handle_quit_room(ws, uid, data)
+    elif action == "select_bubble":
+        await handle_select_bubble(ws, uid, data)
+    else:
+        await ws.send_text(json.dumps({"action": "error", "message": f"Unknown action: {action}"}))
+
+# ---------- Scheduled Tasks ----------
+async def daily_player_cleanup():
+    """Clear player records daily at midnight."""
+    while True:
+        now = datetime.now()
+        next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        wait_time = (next_run - now).total_seconds()
+        await asyncio.sleep(wait_time)
+        
+        logger.info("Daily cleanup: Clearing all players from DB...")
+        try:
+            execute("DELETE FROM players", commit=True)
+            rooms_state.clear()
+        except Exception as e:
+            logger.exception("Daily cleanup failed: %s", e)
+
+# ---------- Startup ----------
 @app.on_event("startup")
-def load_rooms_from_db():
-    asyncio.create_task(clear_players_daily())
+def startup():
+    """Initialize server state from database."""
+    asyncio.create_task(daily_player_cleanup())
+    
     logger.info("Loading rooms from DB...")
     try:
         rows = execute("SELECT * FROM rooms", fetch=True, dictionary=True) or []
         for r in rows:
             room_id = str(r["id"])
             players = execute(
-                "SELECT id, name, room_id, joined_at FROM players WHERE room_id=%s",
+                "SELECT id, name, room_id, joined_at, color FROM players WHERE room_id=%s",
                 (r["id"],), fetch=True, dictionary=True
             ) or []
-            players_slim = [{"id": str(p["id"]), "name": p["name"], "color": None} for p in players]
+            
             rooms_state[room_id] = {
-                "host": str(r["host_id"]) if r.get("host_id") is not None else None,
-                "players": players_slim,
+                "host": str(r["host_id"]) if r.get("host_id") else None,
+                "players": [{"id": str(p["id"]), "name": p["name"], "color": p.get("color")} for p in players],
+                "watchers": [],
                 "option": "asc",
                 "game_started": bool(r.get("started")),
-                "bubbles": {}
+                "bubbles": {},
+                "index": 0,
+                "play_order": [],
+                "display_order": []
             }
         logger.info("Recovered %d rooms from DB", len(rooms_state))
     except Exception as e:
         logger.exception("Failed to load rooms from DB: %s", e)
 
-
-# ---------- Broadcast helpers ----------
-async def broadcast_menu():
-    # Send connected users to components that listen for menu_update
-    users = []
-    for uid in connected_clients.keys():
-        # We don't have persistent color in DB (frontend keeps color). Send minimal info.
-        users.append({"id": uid, "name": "Player"})
-    payload = {"action": "menu_update", "users": users}
-    for ws in list(connected_clients.values()):
-        try:
-            await ws.send_text(json.dumps(payload))
-        except Exception:
-            pass
-
-async def broadcast_rooms():
-    # read canonical rooms from DB (so REST/WS writes are authoritative)
-    try:
-        rooms = execute(
-            """
-            SELECT r.id, r.host_id, r.created_at, COUNT(p.id) AS player_count
-            FROM rooms r
-            LEFT JOIN players p ON r.id = p.room_id
-            GROUP BY r.id
-            """,
-            fetch=True, dictionary=True
-        ) or []
-    except Exception as e:
-        logger.exception("broadcast_rooms DB read failed: %s", e)
-        rooms = []
-    payload = {"action": "rooms_update", "rooms": rooms}
-    for ws in list(connected_clients.values()):
-        try:
-            await ws.send_text(json.dumps(payload))
-        except Exception:
-            pass
-
-async def broadcast_room_update(room_id: str):
-    state = rooms_state.get(str(room_id))
-    if not state:
-        return
-    payload = {
-        "action": "room_update",
-        "roomId": str(room_id),
-        "players": state["players"],
-        "watchers": state.get("watchers", []),
-        "hostId": state["host"]
-    }
-    for pid, ws in list(connected_clients.items()):
-        try:
-            await ws.send_text(json.dumps(payload))
-        except Exception:
-            pass
-
-
-# ---------- REST endpoints----------
+# ---------- REST Endpoints ----------
 @app.post("/login")
 def login(payload: dict = Body(...)):
     name = payload.get("user_name") or payload.get("name")
     if not name:
         return {"status": "error", "message": "user_name required"}
-
+    
     try:
-        # Wrap everything that can fail
         players = execute("SELECT id, name, color FROM players", fetch=True, dictionary=True) or []
         if len(players) >= 12:
             return {"status": "error", "message": "Maximum 12 players allowed"}
-
+        
         used_colors = {p["color"] for p in players if p.get("color")}
         available_colors = [c for c in PLAYER_COLORS if c not in used_colors]
         if not available_colors:
             return {"status": "error", "message": "No colors available"}
+        
         color = available_colors[0]
-
-        # create player and return id
-        execute(
-            "INSERT INTO players (name, joined_at, color) VALUES (%s, NOW(), %s)",
-            (name, color),
-            commit=True
-        )
+        execute("INSERT INTO players (name, joined_at, color) VALUES (%s, NOW(), %s)", (name, color), commit=True)
         row = execute("SELECT LAST_INSERT_ID() AS id", fetch=True, dictionary=True)[0]
-        player_id = int(row["id"])
-        return {"status": "ok", "userId": str(player_id), "userName": name, "color": color}
-
+        
+        return {"status": "ok", "userId": str(row["id"]), "userName": name, "color": color}
     except Exception as e:
         logger.exception("Login failed: %s", e)
         return {"status": "error", "message": "db error"}
 
 @app.post("/logout")
 def logout(background_tasks: BackgroundTasks, payload: dict = Body(...)):
-    # frontend sends { user_id }
     uid = payload.get("user_id") or payload.get("player_id")
     if not uid:
         return {"status": "error", "message": "user_id required"}
+    
     try:
-        # remove player record (your frontend expected this behavior)
         execute("DELETE FROM players WHERE id=%s", (uid,), commit=True)
-        # also cleanup connected_clients if present
+        
         if uid in connected_clients:
-            # we won't close socket here; client typically disconnects
             connected_clients.pop(uid, None)
-        # update rooms_state to remove player
+        
+        # Remove from all rooms
         for rid in list(rooms_state.keys()):
-            rooms_state[rid]["players"] = [p for p in rooms_state[rid]["players"] if p["id"] != uid]
-        # async broadcast rooms/menu
+            room = rooms_state[rid]
+            room["players"] = [p for p in room["players"] if p["id"] != uid]
+            room["watchers"] = [w for w in room.get("watchers", []) if str(w["id"]) != str(uid)]
+        
         background_tasks.add_task(broadcast_rooms)
-        background_tasks.add_task(broadcast_menu)
         return {"status": "logged_out", "userId": uid}
     except Exception as e:
         logger.exception("Logout failed: %s", e)
         return {"status": "error", "message": "db error"}
 
 @app.post("/rooms/create")
-def create_room(background_tasks: BackgroundTasks, payload: dict = Body(...)):
-    uname = payload.get("user_name")
-    if not uname:
-        return {"status": "error", "message": "user_name required"}
-
+def create_room(payload: dict = Body(...)):
     try:
-        # 1. Find player by name
-        existing = execute(
-            "SELECT id FROM players WHERE name=%s ORDER BY joined_at DESC LIMIT 1",
-            (uname,),
-            fetch=True,
-            dictionary=True
-        )
-
-        if existing:
-            uid = existing[0]["id"]
-        else:
-            # auto-create player if missing
-            uid = execute("INSERT INTO players (name, joined_at) VALUES (%s, NOW())", (uname,), commit=True)  
-            
-
-        # 2. Create room
-        room_id = execute(
+        uid = norm_id(payload["user_id"])
+        room_id = str(execute(
             "INSERT INTO rooms (host_id, created_at) VALUES (%s, NOW())",
-            (uid,),
-            commit=True
-        )
-        print("room id: ", room_id)
-
-        # 3. Update player's room_id
+            (uid,), commit=True
+        ))
+        
         execute("UPDATE players SET room_id=%s WHERE id=%s", (room_id, uid), commit=True)
-
-        # 4. Update in-memory state
-        rooms_state[str(room_id)] = {
-            "host": str(uid),
-            "players": [{"id": str(uid), "name": uname, "color": None}],
-            "watchers": [],
-            "option": "asc",
-            "game_started": False,
-            "bubbles": {}
-        }
-
-        # 5. Schedule async broadcasts safely
-        background_tasks.add_task(broadcast_rooms)
-        background_tasks.add_task(broadcast_room_update, str(room_id))
-
-        return {"status": "created", "room_id": room_id, "uid": uid}
-
+        player_row = execute(
+            "SELECT id, name, color FROM players WHERE id=%s",
+            (uid,), fetch=True, dictionary=True
+        )
+        option = payload.get("option", "asc")
+        rooms_state[room_id] = ensure_room({
+            "host": uid,
+            "option": option,
+            "players": [
+                {
+                    "id": uid,
+                    "name": player_row[0]["name"] if player_row else "Unknown",
+                    "color": player_row[0]["color"] if player_row else None
+                }
+            ],
+        })
+        
+        return {"room_id": room_id}
     except Exception as e:
-        logger.exception("create_room failed: %s", e)
-        return {"status": "error", "message": "db error"}
+        logger.exception(e)
+        return {"error": "create_room_failed"}
 
 @app.get("/rooms")
 def list_rooms():
     try:
-        rooms = execute(
-            "SELECT r.id, r.host_id, r.created_at, COUNT(p.id) AS player_count "
-            "FROM rooms r LEFT JOIN players p ON r.id=p.room_id GROUP BY r.id",
+        return execute(
+            """SELECT r.id, r.host_id, r.created_at, COUNT(p.id) AS player_count
+               FROM rooms r LEFT JOIN players p ON r.id=p.room_id
+               GROUP BY r.id""",
             fetch=True, dictionary=True
         ) or []
-        # convert ids to native types or strings as your frontend expects numbers; keep as is
-        return rooms
     except Exception as e:
-        logger.exception("list_rooms failed: %s", e)
+        logger.exception("Failed to list rooms: %s", e)
         return []
 
 @app.get("/rooms/{room_id}")
 def get_room(room_id: int):
     try:
-        room = execute(
-            "SELECT r.id, r.host_id, r.created_at FROM rooms r WHERE r.id=%s",
-            (room_id,), fetch=True, dictionary=True
-        )
+        room = execute("SELECT id, host_id, created_at FROM rooms WHERE id=%s", (room_id,), fetch=True, dictionary=True)
         if not room:
             return {"status": "error", "message": "room not found"}
+        
         players = execute("SELECT id, name FROM players WHERE room_id=%s", (room_id,), fetch=True, dictionary=True) or []
         return {"id": room_id, "host_id": room[0]["host_id"], "players": players}
     except Exception as e:
-        logger.exception("get_room failed: %s", e)
+        logger.exception("Failed to get room: %s", e)
         return {"status": "error", "message": "db error"}
-    
+
 @app.get("/players/{name}")
 def get_player_by_name(name: str):
     try:
         row = execute(
             "SELECT id, name FROM players WHERE name=%s ORDER BY joined_at DESC LIMIT 1",
-            (name,),
-            fetch=True,
-            dictionary=True
+            (name,), fetch=True, dictionary=True
         )
-        if row:
-            return row[0]
-        return {"status": "error", "message": "player not found"}
+        return row[0] if row else {"status": "error", "message": "player not found"}
     except Exception as e:
-        logger.exception("Failed to fetch player by name: %s", e)
+        logger.exception("Failed to fetch player: %s", e)
         return {"status": "error", "message": "db error"}
 
-# ---------- WebSocket endpoint ----------
-class CloseCodes:
-    INVALID_PLAYER = 4000
-
+# ---------- WebSocket Endpoint ----------
 @app.websocket("/ws/{player_name}")
-async def websocket_endpoint(websocket: WebSocket, player_name: str):
-    try:
-        rows = execute(
-            "SELECT id, name FROM players WHERE name=%s ORDER BY joined_at DESC LIMIT 1",
-            (player_name,),
-            fetch=True,
-            dictionary=True
-        )
-        if not rows:
-            execute("INSERT INTO players (name, joined_at) VALUES (%s, NOW())", (player_name,), commit=True)
-            row = execute("SELECT LAST_INSERT_ID() AS id", fetch=True, dictionary=True)[0]
-            player_id = str(row["id"])
-            logger.info(f"Auto-created player {player_name} with id {player_id}")
-            color = None
-        else:
-            player_id = str(rows[0]["id"])
-            color = rows[0].get("color")
-    except Exception as e:
-        logger.error(f"DB error on WebSocket connect: {e}")
-        player_id = f"temp_{random.randint(1000,9999)}"
-
-    await websocket.accept()
-    connected_clients[player_id] = websocket
-    logger.info("WS CONNECT: %s (%s)", player_name, player_id)
-    asyncio.create_task(broadcast_menu())
-    asyncio.create_task(broadcast_rooms())
-
+async def websocket_endpoint(ws: WebSocket, player_name: str):
+    # Get or create player
+    rows = execute(
+        "SELECT id FROM players WHERE name=%s ORDER BY joined_at DESC LIMIT 1",
+        (player_name,), fetch=True, dictionary=True
+    )
+    
+    if rows:
+        player_id = norm_id(rows[0]["id"])
+    else:
+        player_id = norm_id(execute(
+            "INSERT INTO players (name, joined_at) VALUES (%s, NOW())",
+            (player_name,), commit=True
+        ))
+    
+    await ws.accept()
+    connected_clients[player_id] = ws
+    await broadcast_rooms()
+    
     try:
         while True:
-            raw = await websocket.receive_text()
+            raw = await ws.receive_text()
             try:
                 msg = json.loads(raw)
             except Exception:
-                logger.warning("Invalid JSON from %s: %s", player_id, raw)
+                logger.error("Invalid WS message: %s", raw)
                 continue
-            await handle_ws_action(websocket, player_id, player_name, color, msg)
+
+            await handle_ws_action(ws, player_id, player_name, msg)
+
     except WebSocketDisconnect:
-        logger.info("WS Disconnect: %s", player_id)
-        connected_clients.pop(player_id, None)
-        await remove_player_from_all_rooms(player_id)
-        asyncio.create_task(broadcast_menu())
-        asyncio.create_task(broadcast_rooms())
+        logger.info("WebSocket disconnected: %s", player_id)
 
+    except Exception as e:
+        logger.exception("WebSocket crashed unexpectedly: %s", e)
 
-# ---------- WS action handler ----------
-async def handle_ws_action(ws: WebSocket, pid: str, pname: str, color: str, data: dict):
-    action = data.get("action")
-    # tolerate both roomId and room_id
-    room_id = data.get("roomId") or data.get("room_id")
-    # some messages include uid/name fields; prefer path params
-    uid = data.get("uid") or pid
-    name = data.get("name") or pname
-
-    logger.info("WS action=%s from=%s", action, uid)
-
-    # handshake -> ack
-    if action == "handshake":
-        payload = {"action": "handshake_ack", "status": "connected", "userId": uid, "userName": name}
-        await ws.send_text(json.dumps(payload))
-        return
-
-    # create_room -> frontend sends roomId after REST; but support WS-only creation too
-    if action == "create_room":
-        
-        rid = room_id
-        if not rid:
-            await ws.send_text(json.dumps({
-                "action": "error",
-                "message": "Missing roomId — create via API first."
-            }))
-            return
-
-        rid = str(rid)
-        # Ensure in-memory state exists
-        if rid not in rooms_state:
-            players = execute("SELECT id, name FROM players WHERE room_id=%s", (rid,), fetch=True, dictionary=True) or []
-            rooms_state[rid] = {
-                "host": str(uid),
-                "players": [{"id": str(p["id"]), "name": p["name"], "color": None} for p in players],
-                "option": data.get("option", "asc"),
-                "game_started": False,
-                "bubbles": {}
-            }
-        # Broadcast only
-        asyncio.create_task(broadcast_rooms())
-        asyncio.create_task(broadcast_room_update(rid))
-
-        return
-
-    # join_room
-    if action == "join_room":
-        if not room_id:
-            await ws.send_text(json.dumps({
-                "action": "error",
-                "message": "roomId required"
-            }))
-            return
-
-        rid = str(room_id)
-
-        # Check if game already started before joining
-        if rid in rooms_state and rooms_state[rid].get("game_started"):
-            await ws.send_text(json.dumps({
-                "action": "error",
-                "message": "Game already started, cannot join"
-            }))
-            return
-
-        if rid not in rooms_state:
-            # load from DB if exists
-            r = execute("SELECT id, host_id FROM rooms WHERE id=%s", (rid,), fetch=True, dictionary=True)
-            if not r:
-                await ws.send_text(json.dumps({"action": "error", "message": "Room not available"}))
-                return
-            # populate from DB
-            players = execute("SELECT id, name FROM players WHERE room_id=%s", (rid,), fetch=True, dictionary=True) or []
-            rooms_state[rid] = {
-                "host": str(r[0]["host_id"]) if r[0].get("host_id") else None,
-                "players": [{"id": str(p["id"]), "name": p["name"], "color": None} for p in players],
-                "option": "asc",
-                "game_started": False,
-                "bubbles": {}
-            }
-
-        # Check capacity (max 4)
-        if len(rooms_state[rid]["players"]) >= 4:
-        # Add as watcher instead of rejecting
-            rooms_state[rid]["watchers"].append({"id": uid, "name": name})
-            await ws.send_text(json.dumps({
-                "action": "joined_as_watcher",
-                "roomId": rid,
-                "message": "Room full — you are watching"
-            }))
-            # Still update UI for all users
-            await broadcast_room_update(rid)
-            asyncio.create_task(broadcast_rooms())
-            return
-
-        # persist player's room_id
-        try:
-            execute("UPDATE players SET room_id=%s WHERE id=%s", (rid, uid), commit=True)
-        except Exception:
-            logger.exception("Failed to update player's room_id")
-
-        # add to memory if not present
-        if not any(p["id"] == uid for p in rooms_state[rid]["players"]):
-            rooms_state[rid]["players"].append({"id": uid, "name": name, "color": None})
-
-        # broadcast room update to players in that room
-        await broadcast_room_update(rid)
-        asyncio.create_task(broadcast_rooms())
-        return
-
-    # leave_room
-    if action == "leave_room":
-        if not room_id:
-            await ws.send_text(json.dumps({
-                "action": "error",
-                "message": "roomId required"
-            }))
-            return
-
-        rid = str(room_id)
-
-        # Ignore leave requests if game already started
-        if rid in rooms_state and rooms_state[rid].get("game_started", False):
-            logger.info(f"Leave ignored for player {uid} in started room {rid}")
-            await ws.send_text(json.dumps({
-                "action": "leave_ignored",
-                "reason": "game_started"
-            }))
-            return
-
-        # normal leave flow
-        if rid in rooms_state:
-            rooms_state[rid]["players"] = [
-                p for p in rooms_state[rid]["players"] if p["id"] != uid
-            ]
-
-        # persist: clear player's room_id
-        try:
-            execute("UPDATE players SET room_id=NULL WHERE id=%s", (uid,), commit=True)
-        except Exception:
-            logger.exception("Failed to clear player's room_id")
-
-        # if room empty -> delete
-        if rid in rooms_state and len(rooms_state[rid]["players"]) == 0:
+    finally:
+        await asyncio.sleep(5)
+        if connected_clients.get(player_id) is ws:
             try:
-                execute("DELETE FROM rooms WHERE id=%s", (rid,), commit=True)
-                execute("DELETE FROM players WHERE room_id=%s", (rid,), commit=True)
+                connected_clients.pop(player_id, None)
             except Exception:
-                logger.exception("Failed to delete empty room from DB")
-            rooms_state.pop(rid, None)
-        else:
-            asyncio.create_task(broadcast_room_update(rid))
-
-        asyncio.create_task(broadcast_rooms())
-        return
-
-
-    # start_game
-    if action == "start_game":
-        if not room_id:
-            await ws.send_text(json.dumps({"action": "error", "message": "roomId required"}))
-            return
-            
-        rid = str(room_id)
-        if rid not in rooms_state:
-            await ws.send_text(json.dumps({"action": "error", "message": "Room not found"}))
-            return
-
-        # only host can start
-        if rooms_state[rid].get("host") != uid:
-            await ws.send_text(json.dumps({"action": "error", "message": "Only host can start"}))
-            return
-            
-        option = rooms_state[rid].get("option", "asc")
-
-        display_numbers = list(range(1, 101))
-        random.shuffle(display_numbers)
-
-        play_order = list(range(1, 101)) if option == "asc" else list(range(100, 0, -1))
-        # Initialize bubbles with proper structure
-        bubbles = {}
-        for i in display_numbers:
-            bubbles[f"B{i}"] = None  # Store as null initially
-        
-        rooms_state[rid]["bubbles"] = bubbles
-        rooms_state[rid]["display_order"] = display_numbers
-        rooms_state[rid]["play_order"] = play_order         
-        rooms_state[rid]["index"] = 0
-        rooms_state[rid]["game_started"] = True  # Add this flag
-
-        # notify players
-        payload = {
-            "action": "game_started",
-            "roomId": rid,
-            "bubbles": bubbles,
-            "players": rooms_state[rid]["players"],
-            "option": option,
-            "display_order": display_numbers,
-            "play_order": play_order
-        }
-
-        for p in rooms_state[rid]["players"]:
-            if not p.get("color"):
-                # assign default color if missing
-                used_colors = {pl.get("color") for pl in rooms_state[rid]["players"] if pl.get("color")}
-                available_colors = [c for c in PLAYER_COLORS if c not in used_colors]
-                p["color"] = available_colors[0] if available_colors else "#000000"
-                execute("UPDATE players SET color=%s WHERE id=%s", (p["color"], p["id"]), commit=True)
-            ws_target = connected_clients.get(str(p["id"]))
-            if ws_target:
-                try:
-                    await ws_target.send_text(json.dumps(payload))
-                except Exception:
-                    pass
-
-        execute("UPDATE rooms SET started=1 WHERE id=%s", (rid,), commit=True)
-        asyncio.create_task(broadcast_rooms())
-        return
-    
-    # quit_room (player quits game manually)
-    if action == "quit_room":
-        if not room_id:
-            await ws.send_text(json.dumps({"action": "error", "message": "roomId required"}))
-            return
-
-        rid = str(room_id)
-        if rid not in rooms_state:
-            await ws.send_text(json.dumps({"action": "error", "message": "Room not found"}))
-            return
-
-        players = rooms_state[rid]["players"]
-        host_id = rooms_state[rid].get("host")
-
-        # Remove the quitting player from memory
-        rooms_state[rid]["players"] = [p for p in players if str(p["id"]) != str(uid)]
-
-        # Clear player's room_id in DB
-        try:
-            execute("UPDATE players SET room_id=NULL WHERE id=%s", (uid,), commit=True)
-        except Exception:
-            logger.exception("Failed to clear player's room_id")
-
-        # If host quits, destroy the entire room
-        if str(uid) == str(host_id):
-            try:
-                execute("DELETE FROM rooms WHERE id=%s", (rid,), commit=True)
-                execute("UPDATE players SET room_id=NULL WHERE room_id=%s", (rid,), commit=True)
-            except Exception:
-                logger.exception("Failed to delete room from DB")
-
-            # Notify all players (if still connected)
-            all_users = rooms_state[rid]["players"][:] 
-            
-            payload = {"action": "room_closed", "roomId": rid, "message": "Host has quit. Room closed."}
-
-            for p in all_users:
-                ws_target = connected_clients.get(str(p["id"]))
-                if ws_target:
-                    try:
-                        await ws_target.send_text(json.dumps(payload))
-                    except Exception:
-                        pass
-
-            await ws.send_text(json.dumps(payload))
-            
-            rooms_state.pop(rid, None)
-
-            # Broadcast updated lobby
-            asyncio.create_task(broadcast_rooms())
-            return
-
-        # If room still has players, broadcast update
-        asyncio.create_task(broadcast_room_update(rid))
-        asyncio.create_task(broadcast_rooms())
-
-        # Acknowledge quitter
-        await ws.send_text(json.dumps({"action": "quit_ack", "roomId": rid}))
-        return
-
-    # select_bubble
-    if action == "select_bubble":
-        if not room_id or not data.get("bubble_id"):
-            await ws.send_text(json.dumps({
-                "action": "error",
-                "message": "roomId and bubble_id required"
-            }))
-            return
-
-        rid = str(room_id)
-        bid = data.get("bubble_id")
-
-        if rid not in rooms_state or not rooms_state[rid].get("game_started"):
-            await ws.send_text(json.dumps({
-                "action": "error",
-                "message": "Game not started or room not found"
-            }))
-            return
-
-        room = rooms_state[rid]
-        bubbles = room["bubbles"]
-        order = room["play_order"] 
-        index = room["index"]
-
-        # expected bubble
-        expected_label = f"B{order[index]}"
-        if bid != expected_label:
-            await ws.send_text(json.dumps({
-                "action": "error",
-                "message": f"You must click {expected_label} next!"
-            }))
-            return
-
-        # ensure player exists
-        player = next((p for p in room["players"] if str(p["id"]) == str(uid)), None)
-        if not player:
-            # create player object if missing
-            player = {"id": uid, "name": name, "color": None}
-            room["players"].append(player)
-
-        # assign color if missing
-        if not player.get("color"):
-                try:
-                    row = execute(
-                        "SELECT color FROM players WHERE id=%s", 
-                        (uid,), fetch=True, dictionary=True
-                    )
-                    if row and row[0].get("color"):
-                        player["color"] = row[0]["color"]
-                    else:
-                        # fallback color from predefined PLAYER_COLORS
-                        used_colors = {p["color"] for p in room["players"] if p.get("color")}
-                        available_colors = [c for c in PLAYER_COLORS if c not in used_colors]
-                        player["color"] = available_colors[0] if available_colors else "#000000"
-                        execute("UPDATE players SET color=%s WHERE id=%s", (player["color"], uid), commit=True)
-                except Exception:
-                    logger.exception("Failed to fetch or assign player color")
-                    player["color"] = "#000000"
-
-        # assign bubble ownership
-        bubbles[bid] = {"uid": uid, "color": player["color"]}
-        room["index"] += 1
-
-        # broadcast bubble update
-        payload = {
-            "action": "update_bubbles",
-            "roomId": rid,
-            "bubbles": bubbles
-        }
-
-        for p in room["players"]:
-            ws_target = connected_clients.get(str(p["id"]))
-            if ws_target:
-                try:
-                    await ws_target.send_text(json.dumps(payload))
-                except Exception:
-                    pass
-
-        # end of game check
-        if room["index"] >= len(order):
-            scores = {}
-            for b in bubbles.values():
-                if b:
-                    pid = b["uid"]
-                    scores[pid] = scores.get(pid, 0) + 1
-            
-            # Find max score
-            max_score = max(scores.values()) if scores else 0
-            
-            # Find all players with max score (handles ties)
-            winners = [pid for pid, score in scores.items() if score == max_score]
-            
-            # Get winner info for all winners
-            winner_players = []
-            for winner_id in winners:
-                winner = next((p for p in room["players"] if str(p["id"]) == str(winner_id)), None)
-                if winner:
-                    winner_players.append(winner)
-            
-            payload_end = {
-                "action": "end_game",
-                "roomId": rid,
-                "winners": winner_players,  # Changed from "winner" to "winners" (array)
-                "is_tie": len(winners) > 1,  # Add tie flag
-                "scores": scores
-            }
-            
-            for p in room["players"]:
-                ws_target = connected_clients.get(str(p["id"]))
-                if ws_target:
-                    try:
-                        await ws_target.send_text(json.dumps(payload_end))
-                    except Exception:
-                        pass
-            
-            # Handle DB update for tie
-            if len(winners) == 1:
-                execute("UPDATE rooms SET winner_id=%s, started=0 WHERE id=%s", (winners[0], rid), commit=True)
-            else:
-                # For tie, you might want to store multiple winners or just mark as tie
-                # Option 1: Store as comma-separated IDs
-                winner_ids = ",".join(winners)
-                execute("UPDATE rooms SET winner_id=%s, started=0 WHERE id=%s", (winner_ids, rid), commit=True)
-                # Option 2: Or you could add a 'tie' column to your rooms table
-            
-            rooms_state.pop(rid, None)
-            asyncio.create_task(broadcast_rooms())
-
-
-
-    # fallback: unknown action
-    await ws.send_text(json.dumps({"action": "error", "message": "Unknown action"}))
-
-handle_ws_message = handle_ws_action
-
-# ---------- Helper to remove player from all rooms ----------
-async def remove_player_from_all_rooms(pid: str):
-    for rid in list(rooms_state.keys()):
-        rooms_state[rid]["players"] = [p for p in rooms_state[rid]["players"] if p["id"] != pid]
-        if len(rooms_state[rid]["players"]) == 0:
-            try:
-                rooms_state.pop(rid, None)
-            except Exception:
-                logger.exception("Failed to remove empty room from DB")
-        else:
-            asyncio.create_task(broadcast_room_update(rid))
-    try:
-        execute("UPDATE players SET room_id=NULL WHERE id=%s", (pid,), commit=True)
-    except Exception:
-        logger.exception("Failed to clear player's room in DB")
-
-async def clear_players_daily():
-    while True:
-        now = datetime.now()
-        next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        wait_time = (next_run - now).total_seconds()
-        await asyncio.sleep(wait_time)
-        logger.info("Clearing all players from DB...")
-        execute("DELETE FROM players", commit=True)
-
-def calculate_scores(bubbles):
-    scores = {}
-    for b in bubbles.values():
-        if b:
-            pid = b["uid"]
-            scores[pid] = scores.get(pid, 0) + 1
-    return scores
+                logger.exception("cleanup failed")
+            await broadcast_rooms()

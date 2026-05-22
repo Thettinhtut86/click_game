@@ -17,13 +17,13 @@ export class Chat {
   constructor(private ws: WebSocket, private router: Router) { }
 
   ngOnInit() {
-    this.ws.messages$.subscribe((messages) => {
-      if (!messages.length) return;
+    // this.ws.messages$.subscribe((messages) => {
+    //   if (!messages.length) return;
 
-      const last = messages[messages.length - 1]; // take the last message
-      if (last.action === 'init') this.messages = last.messages || [];
-      if (last.action === 'new_message') this.messages.push(last.message);
-    });
+    //   const last = messages[messages.length - 1]; // take the last message
+    //   if (last.action === 'init') this.messages = last.messages || [];
+    //   if (last.action === 'new_message') this.messages.push(last.message);
+    // });
   }
 
   sendMessage() {

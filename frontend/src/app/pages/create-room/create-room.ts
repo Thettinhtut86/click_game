@@ -23,11 +23,9 @@ export class CreateRoom {
   createRoom() {
     const uid = sessionStorage.getItem('playerId')!;
     const name = sessionStorage.getItem('playerName')!;
-    this.api.createRoom(uid, name).subscribe(res => {
+    this.api.createRoom(uid, name, this.option).subscribe(res => {
       const roomId = res.room_id;
       sessionStorage.setItem('roomOption', this.option);
-      sessionStorage.setItem('playerId', res.uid || uid);
-      this.ws.send({ action: 'create_room', roomId, option: this.option });
       this.router.navigate(['/room', roomId]);
     }); 
   }

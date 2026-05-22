@@ -10,6 +10,7 @@ import { WebSocket } from '../../services/web-socket';
 })
 
 export class Game implements OnInit, OnDestroy {
+  
   roomId!: string;
   bubbles: Record<string, any> = {};
   players: any[] = [];
@@ -28,29 +29,29 @@ export class Game implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.roomId = this.route.snapshot.params['id'];
+    const savedGame = this.ws.currentGameState;
+    if (
+      savedGame &&
+      savedGame.action === 'game_started' &&
+      savedGame.roomId === this.roomId
+    ) {
+      this.loadGame(savedGame);
+    }
 
-    this.ws.messages$.subscribe((messages) => {
-      if (!messages.length) return;
-      const last = messages[messages.length - 1];
+    
 
-      if (last.action === 'game_started') {
-        this.bubbles = last.bubbles || {};
-        this.players = (last.players || []).slice(0, 4);
-        this.watchers = (last.players || []).slice(4);        
-        this.option = last.option;
-        this.displayOrder = last.display_order || [];
-        this.playOrder = last.play_order || [];
-        this.gameStarted = true;
-        console.log('Game started with order:', this.displayOrder);
-        
-        this.scores = {};
-        this.players.forEach(p => this.scores[p.id] = 0);
+    this.ws.messages$.subscribe((msg:any) => {
+      if (!msg) return;
 
-        this.indexInOrder = 0;
+      if (
+        msg.action === 'game_started' &&
+        msg.roomId === this.roomId
+      ) {
+        this.loadGame(msg);
       }
 
-      if (last.action === 'update_bubbles') {
-        this.bubbles = last.bubbles;
+      if (msg.action === 'update_bubbles') {
+        this.bubbles = msg.bubbles;
 
         this.scores = {};
         Object.values(this.bubbles).forEach((b: any) => {
@@ -64,19 +65,19 @@ export class Game implements OnInit, OnDestroy {
         this.indexInOrder = clickedCount;
       }
 
-      if (last.action === 'end_game') {
-        if (last.is_tie && last.winners && last.winners.length > 1) {
-          const winnerNames = last.winners.map((w: any) => w?.name || 'Unknown').join(', ');
+      if (msg.action === 'end_game') {
+        if (msg.is_tie && msg.winners && msg.winners.length > 1) {
+          const winnerNames = msg.winners.map((w: any) => w?.name || 'Unknown').join(', ');
           alert(`Game Finished! It's a Tie between: ${winnerNames}`);
         } else {
-          const winner = last.winner || last.winners?.[0];
+          const winner = msg.winner || msg.winners?.[0];
           alert(`Game Finished! Winner: ${winner?.name || 'Unknown'}`);
         }
         this.router.navigate(['/menu']);
       }
 
-      if (last.action === 'room_closed') {
-        alert(last.message);
+      if (msg.action === 'room_closed') {
+        alert(msg.message);
         this.router.navigate(['/menu']);
       }
     });
@@ -115,6 +116,19 @@ export class Game implements OnInit, OnDestroy {
 
     // For colored bubbles, use white text for better contrast
     return '#fff';
+  }
+  loadGame(msg: any) {
+    this.bubbles = msg.bubbles || {};
+    this.players = (msg.players || []).slice(0, 4);
+    this.watchers = (msg.players || []).slice(4);
+    this.option = msg.option;
+    this.displayOrder = msg.display_order || [];
+    this.playOrder = msg.play_order || [];
+    this.gameStarted = true;
+    this.scores = {};
+    this.players.forEach(p => this.scores[p.id] = 0);
+    this.indexInOrder = 0;
+    console.log('Game started with order:', this.displayOrder);
   }
 
 
