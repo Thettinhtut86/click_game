@@ -15,8 +15,8 @@ export class Menu implements OnInit {
   uid!: string;
   name!: string;
   color!: string;
-
- bubbles:any[] = [];
+  unreadCount = 0;
+  bubbles:any[] = [];
   constructor(private ws:WebSocket,private router:Router, private api: ApiService, private cursorService:CursorService){}
 
   ngOnInit() {
@@ -26,7 +26,7 @@ export class Menu implements OnInit {
       const last = msgList[msgList.length-1];
       if(last?.action==='menu_update') this.bubbles = last.users;
     });
-    // Fetch player ID from backend by name
+
     this.api.getPlayerByName(this.name).subscribe(res => {
       if(res?.id){
         this.uid = res.id;
@@ -35,11 +35,25 @@ export class Menu implements OnInit {
 
       }
     });
+
+    this.ws.messages$.subscribe((msg:any) => {
+      if(!msg) return;
+      if(msg.action === 'new_message') {
+        const current = this.router.url;
+        if(current !== '/chat') {
+          this.unreadCount++;
+        }
+      }
+    });
   }
+
 
   createRoom() { this.router.navigate(['/create']); }
   joinRoom() { this.router.navigate(['/join']); }
-  allChat() { this.router.navigate(['/chat']); }
+  allChat() {
+    this.unreadCount = 0;
+    this.router.navigate(['/chat']);
+  }
   logout() {
     const uid = sessionStorage.getItem('playerId')!;
     this.api.logout(uid).subscribe(() => {

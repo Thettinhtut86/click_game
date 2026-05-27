@@ -3,6 +3,11 @@
     <h3>Welcome, {{name}}</h3>
     <button (click)="createRoom()">Create Room</button>
     <button (click)="joinRoom()">Join Room</button>
-    <button (click)="allChat()" disabled>Daily Chat</button>
+    <button class="chat-btn" (click)="allChat()">
+        Daily Chat
+        <span *ngIf="unreadCount > 0" class="badge">
+            {{ unreadCount }}
+        </span>
+    </button>
     <button (click)="logout()">Logout</button>
 </div>

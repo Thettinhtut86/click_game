@@ -1,9 +1,106 @@
-<h3>All Chat</h3>
-<div class="chat-box">
-    <div *ngFor="let msg of messages">
-        <b>{{msg.name}}:</b> {{msg.text}}
+<div class="chat-wrapper">
+
+    <header class="chat-header">
+        <h2>Global Chat</h2>
+        <div class="online-users">
+            <div *ngFor="let u of onlineUsers" class="online-user">
+                <div class="dot" [style.background]="u.color"></div>
+                {{ u.name }}
+            </div>
+        </div>
+        <button class="back-btn" (click)="back()">Back</button>
+    </header>
+
+    <div class="chat-box" #chatBox>
+        <ng-container *ngFor="let msg of messages; let i = index">
+            <!-- Grouping: show avatar/meta only for the first message in a group -->
+            <div class="message" [class.mine]="msg.uid === uid">
+                <div class="message-content" [class.mine-layout]="msg.uid === uid">
+                    <!-- Avatar (left side for others) -->
+                    <div class="avatar" *ngIf="msg.uid !== uid && isFirstInGroup(i)" [style.background]="msg.color">
+                        {{ msg.name.charAt(0).toUpperCase() }}
+                    </div>
+
+                    <!-- Placeholder for alignment when no avatar -->
+                    <div class="avatar-spacer" *ngIf="msg.uid !== uid && !isFirstInGroup(i)"></div>
+
+                    <div class="body">
+
+                        <!-- Name + timestamp -->
+                        <div class="meta" *ngIf="isFirstInGroup(i)">
+                            <span class="name" [style.color]="msg.color">{{ msg.name }}</span>
+                            <span class="time">{{ msg.timestamp }}</span>
+                        </div>
+
+                        <!-- MESSAGE ROW -->
+                        <div class="bubble-row">
+
+                            <!-- reactions -->
+                            <div class="reaction-bar" *ngIf="msg.uid === uid">
+                                <button class="react-btn">👍</button>
+                                <button class="react-btn">❤️</button>
+
+                                <div class="menu-wrapper">
+                                    <button class="menu-btn" (click)="toggleMenu(msg.id, $event)" >⋮</button>
+
+                                    <div class="message-menu" *ngIf="openedMenuId === msg.id" (click)="$event.stopPropagation()">
+
+                                        <button>
+                                            Reply
+                                        </button>
+
+                                        <button>
+                                            Pin Message
+                                        </button>
+
+                                        <button *ngIf="!msg.deleted" (click)="deleteMessage(msg.id)">
+                                            Delete
+                                        </button>
+
+                                        <button *ngIf="msg.deleted" (click)="restoreMessage(msg.id)">
+                                            Undo Delete
+                                        </button>
+
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- normal -->
+                            <div class="bubble" *ngIf="!msg.deleted">
+                                <span [innerHTML]="highlightMentions(msg.text)"></span>
+                            </div>
+
+                            <!-- deleted -->
+                            <div class="bubble deleted" *ngIf="msg.deleted">
+                                Message deleted
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <!-- Avatar (right side for my messages) -->
+                    <div class="avatar mine-avatar" *ngIf="msg.uid === uid && isFirstInGroup(i)"
+                        [style.background]="msg.color">
+                        {{ msg.name.charAt(0).toUpperCase() }}
+                    </div>
+                </div>
+            </div>
+        </ng-container>
     </div>
+
+    <!-- Enhanced typing indicator -->
+    <div class="typing-box" *ngIf="typingUsers.length">
+        <div class="typing-dots">
+            <span></span><span></span><span></span>
+        </div>
+        <span class="typing-names">{{ typingUsers.join(', ') }} typing...</span>
+    </div>
+
+    <div class="chat-input">
+        <input [(ngModel)]="chatText" (input)="onTyping()" placeholder="Type a message..." maxlength="300"
+            (keydown.enter)="sendMessage()" />
+        <button (click)="sendMessage()">Send</button>
+    </div>
+
 </div>
-<input [(ngModel)]="chatText" placeholder="Type message" />
-<button (click)="sendMessage()">Send</button>
-<button (click)="back()">Back to Menu</button>

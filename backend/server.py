@@ -1,4 +1,5 @@
 # server.py
+import re
 import json
 import logging
 import asyncio
@@ -40,6 +41,10 @@ app.add_middleware(
 # ---------- In-Memory State ----------
 rooms_state: Dict[str, dict] = {}
 connected_clients: Dict[str, WebSocket] = {}
+chat_messages = []
+typing_users = {}
+MAX_CHAT_MESSAGES = 1000
+MENTION_REGEX = r"@([a-zA-Z0-9_]+)"
 
 # ---------- Database Helper ----------
 def execute(query: str, params: tuple = None, fetch: bool = False, dictionary: bool = False, commit: bool = False):
@@ -183,6 +188,35 @@ async def broadcast_room_update(room_id: str):
     }
     await broadcast_to_all(message)
 
+async def broadcast_chat_message(message: dict):
+    await broadcast_to_all({
+        "action": "new_message",
+        "message": message
+    })
+
+async def broadcast_typing(action: str, uid: str, name: str):
+
+    await broadcast_to_all({
+        "action": action,
+        "uid": uid,
+        "name": name
+    })
+
+async def broadcast_online_users():
+    users = []
+    for uid in connected_clients.keys():
+        row = execute("""
+            SELECT id,name,color FROM players WHERE id=%s
+        """, (uid,), fetch=True, dictionary=True)
+
+        if row:
+            users.append(row[0])
+
+    await broadcast_to_all({
+        "action": "online_users",
+        "users": users
+    })
+
 # ---------- Room Management ----------
 async def remove_player_from_room(player_id: str, room_id: str = None):
     """Remove player from room(s) and update database."""
@@ -240,6 +274,7 @@ async def close_room(room_id: str, reason: str = "Host has quit. Room closed."):
     
     rooms_state.pop(room_id, None)
     await broadcast_rooms()
+
 
 # ---------- Game Logic ----------
 def generate_bubble_order(option: str = "asc") -> list:
@@ -532,6 +567,204 @@ async def handle_select_bubble(ws: WebSocket, uid: str, data: dict):
     if room["index"] >= len(room["play_order"]):
         await handle_game_end(room_id)
 
+async def handle_typing_stop(uid: str, name: str):
+
+    typing_users.pop(uid, None)
+
+    await broadcast_typing(
+        "typing_stop",
+        uid,
+        name
+    )
+
+async def handle_typing_start(uid: str, name: str):
+
+    typing_users[uid] = datetime.now()
+
+    await broadcast_typing(
+        "typing_start",
+        uid,
+        name
+    )
+
+async def handle_send_message(ws, uid, name, data):
+    text = data.get("text", "").strip()
+    if not text or len(text) > 300:
+        return
+
+    player = execute(
+        "SELECT color FROM players WHERE id=%s",
+        (uid,),
+        fetch=True,
+        dictionary=True
+    )
+    color = player[0]["color"] if player else "#ffffff"
+
+    # INSERT MESSAGE
+    msg_id = execute("""
+        INSERT INTO daily_chat
+        (player_id, player_name, player_color, message)
+        VALUES (%s,%s,%s,%s)
+    """, (uid, name, color, text), commit=True)
+
+    # detect mentions
+    mentions = re.findall(MENTION_REGEX, text)
+
+    msg = {
+        "id": msg_id,
+        "uid": uid,
+        "name": name,
+        "color": color,
+        "text": text,
+        "timestamp": datetime.now().strftime("%H:%M"),
+        "mentions": mentions,
+        "deleted": 0
+    }
+
+    # update unread for everyone except sender
+    for user_id in connected_clients.keys():
+        if user_id != uid:
+            execute("""
+                INSERT INTO chat_unread(user_id, unread_count)
+                VALUES (%s,1)
+                ON DUPLICATE KEY UPDATE unread_count = unread_count + 1
+            """, (user_id,), commit=True)
+
+    await broadcast_to_all({
+        "action": "new_message",
+        "message": msg
+    })
+
+    # notify mentions
+    for m in mentions:
+        await broadcast_to_all({
+            "action": "mention",
+            "from": name,
+            "to": m,
+            "message": text
+        })
+
+async def send_chat_history(ws):
+    rows = execute("""
+        SELECT id, player_id, player_name, player_color, message, deleted, created_at
+        FROM daily_chat
+        ORDER BY id ASC
+    """, fetch=True, dictionary=True) or []
+
+    messages = []
+    for r in rows:
+        time_str = r["created_at"].strftime("%H:%M") if not isinstance(r["created_at"], str) else r["created_at"][:5]
+
+        messages.append({
+            "id": r["id"],
+            "uid": r["player_id"],
+            "name": r["player_name"],
+            "color": r["player_color"],
+            "text": r["message"],
+            "deleted": r.get("deleted", 0),
+            "timestamp": time_str
+        })
+
+    await ws.send_text(json.dumps({
+        "action": "init_chat",
+        "messages": messages
+    }))
+
+async def handle_delete_message(uid: str, data: dict):
+
+    message_id = data.get("message_id")
+
+    if not message_id:
+        return
+
+    row = execute(
+        """
+        SELECT player_id
+        FROM daily_chat
+        WHERE id=%s
+        """,
+        (message_id,),
+        fetch=True,
+        dictionary=True
+    )
+
+    if not row:
+        return
+
+    # only owner can delete
+    if str(row[0]["player_id"]) != str(uid):
+        return
+
+    execute(
+        """
+        UPDATE daily_chat
+        SET deleted=1
+        WHERE id=%s
+        """,
+        (message_id,),
+        commit=True
+    )
+
+    await broadcast_to_all({
+        "action": "message_deleted",
+        "message_id": message_id
+    })
+
+
+async def handle_restore_message(uid: str, data: dict):
+
+    message_id = data.get("message_id")
+
+    if not message_id:
+        return
+
+    row = execute(
+        """
+        SELECT player_id
+        FROM daily_chat
+        WHERE id=%s
+        """,
+        (message_id,),
+        fetch=True,
+        dictionary=True
+    )
+
+    if not row:
+        return
+
+    if str(row[0]["player_id"]) != str(uid):
+        return
+
+    execute(
+        """
+        UPDATE daily_chat
+        SET deleted=0
+        WHERE id=%s
+        """,
+        (message_id,),
+        commit=True
+    )
+
+    await broadcast_to_all({
+        "action": "message_restored",
+        "message_id": message_id
+    })
+
+async def mark_seen(uid: str):
+    last_id = execute("""
+        SELECT MAX(id) as last_id FROM daily_chat
+    """, fetch=True, dictionary=True)[0]["last_id"]
+
+    execute("""
+        INSERT INTO chat_reads(user_id, last_read_id)
+        VALUES (%s,%s)
+        ON DUPLICATE KEY UPDATE last_read_id=%s
+    """, (uid, last_id, last_id), commit=True)
+
+    execute("""
+        UPDATE chat_unread SET unread_count=0 WHERE user_id=%s
+    """, (uid,), commit=True)
+    
 async def handle_ws_action(ws: WebSocket, player_id: str, player_name: str, data: dict):
     """Route WebSocket actions to appropriate handlers."""
     action = data.get("action")
@@ -554,8 +787,22 @@ async def handle_ws_action(ws: WebSocket, player_id: str, player_name: str, data
         await handle_quit_room(ws, uid, data)
     elif action == "select_bubble":
         await handle_select_bubble(ws, uid, data)
+    elif action == "send_message":
+        await handle_send_message(ws, uid, name, data)
+    elif action == "load_chat":
+        await send_chat_history(ws)
+    elif action == "typing_start":
+        await handle_typing_start(uid, name)
+    elif action == "typing_stop":
+        await handle_typing_stop(uid, name)
+    elif action == "delete_message":
+        await handle_delete_message(uid, data)
+
+    elif action == "restore_message":
+        await handle_restore_message(uid, data)      
     else:
         await ws.send_text(json.dumps({"action": "error", "message": f"Unknown action: {action}"}))
+
 
 # ---------- Scheduled Tasks ----------
 async def daily_player_cleanup():
@@ -569,7 +816,12 @@ async def daily_player_cleanup():
         logger.info("Daily cleanup: Clearing all players from DB...")
         try:
             execute("DELETE FROM players", commit=True)
+            execute("DELETE FROM daily_chat", commit=True)
             rooms_state.clear()
+            await broadcast_to_all({
+                "action": "chat_reset"
+            })
+
         except Exception as e:
             logger.exception("Daily cleanup failed: %s", e)
 
@@ -743,7 +995,11 @@ async def websocket_endpoint(ws: WebSocket, player_name: str):
     
     await ws.accept()
     connected_clients[player_id] = ws
+    await send_chat_history(ws)
+    await broadcast_online_users()
+    await mark_seen(player_id)
     await broadcast_rooms()
+    
     
     try:
         while True:
@@ -763,10 +1019,16 @@ async def websocket_endpoint(ws: WebSocket, player_name: str):
         logger.exception("WebSocket crashed unexpectedly: %s", e)
 
     finally:
-        await asyncio.sleep(5)
-        if connected_clients.get(player_id) is ws:
-            try:
+
+        try:
+            typing_users.pop(player_id, None)
+
+            # only remove if same websocket
+            if connected_clients.get(player_id) == ws:
                 connected_clients.pop(player_id, None)
-            except Exception:
-                logger.exception("cleanup failed")
-            await broadcast_rooms()
+
+        except Exception:
+            logger.exception("cleanup failed")
+
+        await broadcast_online_users()
+        await broadcast_rooms()

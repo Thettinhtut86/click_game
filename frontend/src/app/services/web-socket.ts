@@ -18,15 +18,33 @@ export class WebSocket {
 
   connect(userName: string, userId?: string) {
 
-    if (this.isConnected) return;
+    if (this.socket && !this.socket.closed) {return;}
 
     this.userName = userName;
     this.userId = userId || '';
 
     this.socket = webSocket({
+
       url: `ws://192.168.250.1:8000/ws/${userName}`,
+
       serializer: (msg: any) => JSON.stringify(msg),
-      deserializer: ({ data }) => JSON.parse(data)
+
+      deserializer: ({ data }) => JSON.parse(data),
+
+      openObserver: {
+        next: () => {
+          console.log('WS CONNECTED');
+          this.isConnected = true;
+        }
+      },
+
+      closeObserver: {
+        next: () => {
+          console.log('WS CLOSED');
+          this.isConnected = false;
+        }
+      }
+
     });
 
     this.socket.subscribe({
@@ -37,17 +55,16 @@ export class WebSocket {
         this.messages$.next(msg);
       },
 
-      error: (err) => {
-        console.error('WS ERROR', err);
-        this.isConnected = false;
+    error: (err) => {
 
-        this.isConnected = false;
-        setTimeout(() => {
-          if (!this.isConnected) {
-            this.connect(this.userName, this.userId);
-          }
-        }, 2000);
-      },
+      console.error('WS ERROR', err);
+      this.isConnected = false;
+
+      setTimeout(() => {
+        console.log('Reconnecting WS...');
+        this.connect(this.userName, this.userId);
+      }, 2000);
+    },
 
       complete: () => {
         this.isConnected = false;
