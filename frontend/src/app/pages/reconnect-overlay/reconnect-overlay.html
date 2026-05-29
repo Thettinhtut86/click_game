@@ -1,0 +1,7 @@
+<div class="overlay" *ngIf="showOverlay" [class.connected]="connected">
+    <div class="box">
+        <div class="spinner"></div>
+        <h3>{{ connected ? 'Connected!' : 'Reconnecting...' }}</h3>
+        <p>{{ connected ? 'Connection restored' : 'Please wait while we restore connection' }}</p>
+    </div>
+</div>
