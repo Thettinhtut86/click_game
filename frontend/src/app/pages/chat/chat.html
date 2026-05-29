@@ -12,7 +12,7 @@
     </header>
 
     <div class="chat-box" #chatBox>
-        <ng-container *ngFor="let msg of messages; let i = index">
+        <ng-container *ngFor="let msg of filteredMessages; let i = index">
             <!-- Grouping: show avatar/meta only for the first message in a group -->
             <div class="message" [class.mine]="msg.uid === uid">
                 <div class="message-content" [class.mine-layout]="msg.uid === uid">

@@ -12,6 +12,7 @@ import { Chat } from './pages/chat/chat';
 import { Room } from './pages/room/room';
 import { Game } from './pages/game/game';
 import { HttpClientModule } from '@angular/common/http';
+import { ReconnectOverlay } from './pages/reconnect-overlay/reconnect-overlay';
 
 
 @NgModule({
@@ -23,7 +24,8 @@ import { HttpClientModule } from '@angular/common/http';
     JoinRoom,
     Chat,
     Room,
-    Game
+    Game,
+    ReconnectOverlay
   ],
   imports: [
     BrowserModule,

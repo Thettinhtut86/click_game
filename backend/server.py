@@ -6,10 +6,12 @@ import asyncio
 import random
 import mysql.connector
 from mysql.connector import Error
-from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, Body
+from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, Body, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time, timezone
 from typing import Dict, Optional
+from jose import JWTError, jwt
+from urllib.parse import parse_qs
 
 # ---------- Configuration ----------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -45,6 +47,9 @@ chat_messages = []
 typing_users = {}
 MAX_CHAT_MESSAGES = 1000
 MENTION_REGEX = r"@([a-zA-Z0-9_]+)"
+SECRET_KEY = "y9UCH4fYAqOqIIz3YmqZGo5zAc4wF3MT1WBFGqANbw0"
+ALGORITHM = "HS256"
+
 
 # ---------- Database Helper ----------
 def execute(query: str, params: tuple = None, fetch: bool = False, dictionary: bool = False, commit: bool = False):
@@ -125,6 +130,53 @@ def get_player_color(player: dict, room: dict, uid: str) -> str:
         logger.exception("Failed to save player color")
     
     return color
+
+def get_minutes_until_midnight() -> int:
+    now = datetime.now()
+
+    tomorrow = now + timedelta(days=1)
+    midnight = datetime.combine(tomorrow.date(), time.min)
+    
+    minutes_remaining = int((midnight - now).total_seconds() / 60)
+    
+    return max(1, minutes_remaining)
+ACCESS_TOKEN_EXPIRE_MINUTES = get_minutes_until_midnight() 
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload  
+    except JWTError:
+        return None
+
+def get_current_user(token: str):    
+    payload = verify_token(token)
+    if not payload:
+        raise Exception("Invalid token")
+    return payload
+
+def get_token_from_header(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing token")
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid auth header")
+
+    token = authorization.split(" ")[1]
+
+    payload = verify_token(token)
+
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    return payload
 
 # ---------- Broadcast Functions ----------
 async def broadcast_to_all(message: dict):
@@ -648,12 +700,17 @@ async def send_chat_history(ws):
     rows = execute("""
         SELECT id, player_id, player_name, player_color, message, deleted, created_at
         FROM daily_chat
+        WHERE DATE(created_at) = CURDATE()
         ORDER BY id ASC
     """, fetch=True, dictionary=True) or []
 
     messages = []
     for r in rows:
-        time_str = r["created_at"].strftime("%H:%M") if not isinstance(r["created_at"], str) else r["created_at"][:5]
+        created_at = r["created_at"]
+        if isinstance(created_at, str):
+            time_str = created_at[11:16]
+        else:
+            time_str = created_at.strftime("%H:%M")
 
         messages.append({
             "id": r["id"],
@@ -768,8 +825,8 @@ async def mark_seen(uid: str):
 async def handle_ws_action(ws: WebSocket, player_id: str, player_name: str, data: dict):
     """Route WebSocket actions to appropriate handlers."""
     action = data.get("action")
-    uid = data.get("uid") or player_id
-    name = data.get("name") or player_name
+    uid = player_id
+    name = player_name
     
     logger.info("WS action=%s from=%s", action, uid)
     
@@ -797,7 +854,6 @@ async def handle_ws_action(ws: WebSocket, player_id: str, player_name: str, data
         await handle_typing_stop(uid, name)
     elif action == "delete_message":
         await handle_delete_message(uid, data)
-
     elif action == "restore_message":
         await handle_restore_message(uid, data)      
     else:
@@ -813,10 +869,16 @@ async def daily_player_cleanup():
         wait_time = (next_run - now).total_seconds()
         await asyncio.sleep(wait_time)
         
-        logger.info("Daily cleanup: Clearing all players from DB...")
+        logger.info("Daily cleanup: Clearing all players and daily chats from DB...")
         try:
-            execute("DELETE FROM players", commit=True)
-            execute("DELETE FROM daily_chat", commit=True)
+            execute("DELETE FROM players WHERE created_at < CURDATE()", commit=True)
+
+            execute("DELETE FROM daily_chat WHERE created_at < CURDATE()", commit=True)
+
+            execute("DELETE FROM chat_reads", commit=True)
+
+            execute("DELETE FROM chat_unread", commit=True)
+
             rooms_state.clear()
             await broadcast_to_all({
                 "action": "chat_reset"
@@ -874,10 +936,10 @@ def login(payload: dict = Body(...)):
             return {"status": "error", "message": "No colors available"}
         
         color = available_colors[0]
-        execute("INSERT INTO players (name, joined_at, color) VALUES (%s, NOW(), %s)", (name, color), commit=True)
-        row = execute("SELECT LAST_INSERT_ID() AS id", fetch=True, dictionary=True)[0]
+        user_id = execute("INSERT INTO players (name, joined_at, color) VALUES (%s, NOW(), %s)", (name, color), commit=True)
+        token = create_access_token({"user_id": str(user_id), "userName":name, "color": color})
         
-        return {"status": "ok", "userId": str(row["id"]), "userName": name, "color": color}
+        return {"status": "ok", "user_id": str(user_id), "userName": name, "color": color,"token": token}
     except Exception as e:
         logger.exception("Login failed: %s", e)
         return {"status": "error", "message": "db error"}
@@ -885,9 +947,9 @@ def login(payload: dict = Body(...)):
 @app.post("/logout")
 def logout(background_tasks: BackgroundTasks, payload: dict = Body(...)):
     uid = payload.get("user_id") or payload.get("player_id")
-    if not uid:
+    if not uid or uid == "undefined":
+        logger.error("Invalid logout uid received: %s", uid)
         return {"status": "error", "message": "user_id required"}
-    
     try:
         execute("DELETE FROM players WHERE id=%s", (uid,), commit=True)
         
@@ -907,9 +969,11 @@ def logout(background_tasks: BackgroundTasks, payload: dict = Body(...)):
         return {"status": "error", "message": "db error"}
 
 @app.post("/rooms/create")
-def create_room(payload: dict = Body(...)):
+def create_room(payload: dict = Body(...), authorization: str = Header(None)):
     try:
-        uid = norm_id(payload["user_id"])
+        user = get_token_from_header(authorization)
+
+        uid = norm_id(user["user_id"])
         room_id = str(execute(
             "INSERT INTO rooms (host_id, created_at) VALUES (%s, NOW())",
             (uid,), commit=True
@@ -977,29 +1041,30 @@ def get_player_by_name(name: str):
         return {"status": "error", "message": "db error"}
 
 # ---------- WebSocket Endpoint ----------
-@app.websocket("/ws/{player_name}")
-async def websocket_endpoint(ws: WebSocket, player_name: str):
-    # Get or create player
-    rows = execute(
-        "SELECT id FROM players WHERE name=%s ORDER BY joined_at DESC LIMIT 1",
-        (player_name,), fetch=True, dictionary=True
-    )
-    
-    if rows:
-        player_id = norm_id(rows[0]["id"])
-    else:
-        player_id = norm_id(execute(
-            "INSERT INTO players (name, joined_at) VALUES (%s, NOW())",
-            (player_name,), commit=True
-        ))
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    query = ws.query_params
+    token = query.get("token")
+
+    if not token:
+        await ws.close(code=1008)
+        return
+
+    payload = verify_token(token)
+    if not payload:
+        await ws.close(code=1008)
+        return
+
+    player_id = norm_id(payload["user_id"])
+    player_name = payload["userName"]
+    player_color = payload.get("color")
+
     
     await ws.accept()
     connected_clients[player_id] = ws
-    await send_chat_history(ws)
     await broadcast_online_users()
     await mark_seen(player_id)
     await broadcast_rooms()
-    
     
     try:
         while True:
@@ -1026,6 +1091,11 @@ async def websocket_endpoint(ws: WebSocket, player_name: str):
             # only remove if same websocket
             if connected_clients.get(player_id) == ws:
                 connected_clients.pop(player_id, None)
+            await broadcast_typing(
+                "typing_stop",
+                player_id,
+                player_name
+            )
 
         except Exception:
             logger.exception("cleanup failed")

@@ -20,33 +20,30 @@ export class Menu implements OnInit {
   constructor(private ws:WebSocket,private router:Router, private api: ApiService, private cursorService:CursorService){}
 
   ngOnInit() {
+    this.uid = sessionStorage.getItem('playerId') || '';
     this.name = sessionStorage.getItem('playerName')!;
     this.color = sessionStorage.getItem('playerColor')!;
-    this.ws.messages$.subscribe(msgList=>{
-      const last = msgList[msgList.length-1];
-      if(last?.action==='menu_update') this.bubbles = last.users;
-    });
+    const token = sessionStorage.getItem('token');
 
-    this.api.getPlayerByName(this.name).subscribe(res => {
-      if(res?.id){
-        this.uid = res.id;
-        sessionStorage.setItem('playerId', this.uid);
+    this.ws.messages$.subscribe((msg: any) => {
 
+    if (!msg) {
+      return;
+    }
 
+    if (msg.action === 'menu_update') {
+      this.bubbles = msg.users;
+    }
+
+    if (msg.action === 'new_message') {
+      const current = this.router.url;
+      if (current !== '/chat') {
+        this.unreadCount++;
       }
-    });
+    }
 
-    this.ws.messages$.subscribe((msg:any) => {
-      if(!msg) return;
-      if(msg.action === 'new_message') {
-        const current = this.router.url;
-        if(current !== '/chat') {
-          this.unreadCount++;
-        }
-      }
-    });
-  }
-
+  });
+}
 
   createRoom() { this.router.navigate(['/create']); }
   joinRoom() { this.router.navigate(['/join']); }
@@ -54,13 +51,23 @@ export class Menu implements OnInit {
     this.unreadCount = 0;
     this.router.navigate(['/chat']);
   }
-  logout() {
-    const uid = sessionStorage.getItem('playerId')!;
-    this.api.logout(uid).subscribe(() => {
-        this.ws.disconnect();
-        sessionStorage.clear();
-        this.cursorService.resetCursor();
-        this.router.navigate(['/login']);
-      });
-  }
+logout() {
+  const uid = sessionStorage.getItem('playerId')!;
+  console.log("LOGOUT SENDING UID =", uid);
+
+  if (!uid || uid === 'undefined'){
+    this.ws.disconnect();
+    sessionStorage.clear();
+    this.router.navigate(['/login']);
+    return;
+    }
+    
+  this.api.logout(uid).subscribe(() => {
+    this.ws.disconnect();
+    sessionStorage.clear();
+    this.cursorService.resetCursor();
+    this.router.navigate(['/login']);
+  });
+
+ }
 }

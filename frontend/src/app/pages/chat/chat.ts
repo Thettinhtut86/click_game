@@ -12,6 +12,7 @@ export class Chat {
   messages: any[] = [];
   uid = sessionStorage.getItem('playerId')!;
   name = sessionStorage.getItem('playerName')!;
+  token = sessionStorage.getItem('token')!;
   @ViewChild('chatBox') chatBox!: ElementRef;
   onlineUsers:any[] = [];
   chatText = '';
@@ -21,19 +22,29 @@ export class Chat {
   private typingSent = false;
   unreadCount = 0;
   openedMenuId: number | null = null;
+  showOnlyMyMessages = false;
 
   constructor(private ws: WebSocket, private router: Router) { }
 
   ngOnInit() {
+    this.ws.send({
+      action: 'load_chat'
+    });
 
     this.ws.messages$.subscribe((msg: any) => {
 
       if (!msg) return;
 
       if (msg.action === 'init_chat') {
-        this.messages = msg.messages || [];
-        this.scrollToBottom();
+      const map = new Map();
+
+      for (const m of msg.messages || []) {
+        map.set(m.id, m);
       }
+
+      this.messages = Array.from(map.values());
+      this.scrollToBottom();
+    }
 
       if (msg.action === 'new_message') {
         const shouldScroll = this.isNearBottom();
@@ -177,9 +188,25 @@ export class Chat {
   highlightMentions(text: string) {
     return text.replace(/@(\w+)/g, '<b>@$1</b>');
   }
+  my_messages() { 
+    this.showOnlyMyMessages = !this.showOnlyMyMessages;
+  }
+
+  get filteredMessages() {
+    return this.showOnlyMyMessages
+      ? this.messages.filter(m => m.uid === this.uid)
+      : this.messages;
+  }
+
   back() { this.router.navigate(['/menu']); }
 
   ngOnDestroy() {
-    
+    clearTimeout(this.typingTimeout);
+
+    if (this.typingSent) {
+      this.ws.send({
+        action: 'typing_stop'
+      });
+    }
   }
 }

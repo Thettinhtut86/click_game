@@ -8,81 +8,93 @@ import { Subject } from 'rxjs';
 export class WebSocket {
 
   private socket!: WebSocketSubject<any>;
-  private isConnected = false;
-
+  private connected  = false;
+  private connecting = false;
+  private reconnectAttempts = 0;
   private userName!: string;
   private userId!: string;
+  private token!: string;
   public currentGameState: any = null;
   // SINGLE STREAM
   public messages$ = new Subject<any>();
 
-  connect(userName: string, userId?: string) {
+  public connectionState$ = new Subject<'connected' | 'connecting' | 'disconnected'>();
 
-    if (this.socket && !this.socket.closed) {return;}
+  connect(userName: string, token: string, userId?: string) {
+    if (this.connected || this.connecting) return;
+    
+    this.connecting = true;
+    this.connected = false;
+    this.connectionState$.next('connecting');
 
     this.userName = userName;
     this.userId = userId || '';
+    this.token = token;
+    
+    if (this.socket) {
+      try {
+        this.socket.unsubscribe();
+      } catch {}
+    }
 
     this.socket = webSocket({
 
-      url: `ws://192.168.250.1:8000/ws/${userName}`,
+    url: `ws://192.168.250.1:8000/ws?token=${token}`,
 
       serializer: (msg: any) => JSON.stringify(msg),
-
       deserializer: ({ data }) => JSON.parse(data),
 
       openObserver: {
         next: () => {
           console.log('WS CONNECTED');
-          this.isConnected = true;
+
+          this.connected = true;
+          this.connecting = false;
+
+          this.reconnectAttempts = 0;
+
+          this.connectionState$.next('connected');
         }
       },
 
       closeObserver: {
         next: () => {
           console.log('WS CLOSED');
-          this.isConnected = false;
+
+          this.connected = false;
+          this.connecting = false;
+
+          this.connectionState$.next('disconnected');
+
+          this.triggerReconnect();
         }
       }
-
     });
-
     this.socket.subscribe({
-      next: (msg) => {
-        if (msg.action === 'game_started') {
-          this.currentGameState = msg;
-  }
-        this.messages$.next(msg);
+      next: (msg) => this.messages$.next(msg),
+
+      error: () => {
+        this.connected = false;
+        this.connecting = false;
+        this.connectionState$.next('disconnected');
+        this.triggerReconnect();
       },
 
-    error: (err) => {
-
-      console.error('WS ERROR', err);
-      this.isConnected = false;
-
-      setTimeout(() => {
-        console.log('Reconnecting WS...');
-        this.connect(this.userName, this.userId);
-      }, 2000);
-    },
-
       complete: () => {
-        this.isConnected = false;
+        this.connected = false;
+        this.connecting = false;
+        this.connectionState$.next('disconnected');
+        this.triggerReconnect();
       }
     });
 
-    this.isConnected = true;
-
     setTimeout(() => {
-      this.send({
-        action: 'handshake',
-        userName
-      });
+      this.send({ action: 'handshake', userName });
     }, 100);
-  }
+}
 
 send(data: any) {
-  if (!this.isConnected || !this.socket) {
+  if (!this.connected || !this.socket) {
     console.warn("WS not ready, dropping:", data);
     return;
   }
@@ -90,7 +102,7 @@ send(data: any) {
 }
 
   disconnect() {
-    this.isConnected = false;
+    this.connected  = false;
     this.socket?.complete();
   }
 
@@ -129,5 +141,23 @@ send(data: any) {
       roomId,
       bubble_id: bubbleId
     });
+  }
+  private triggerReconnect() {
+
+    if (this.reconnectAttempts >= 5) return;
+
+    this.reconnectAttempts++;
+
+    setTimeout(() => {
+
+      const t = sessionStorage.getItem('token');
+      const n = sessionStorage.getItem('playerName');
+      const id = sessionStorage.getItem('playerId');
+
+      if (t && n) {
+        this.connect(n, t, id || undefined);
+      }
+
+    }, 1500 * this.reconnectAttempts); 
   }
 }

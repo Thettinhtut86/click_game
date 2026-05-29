@@ -9,7 +9,7 @@ import { Game } from './pages/game/game';
 import { Chat } from './pages/chat/chat';
 
 const routes: Routes = [
-{ path: '', component: Login },
+{ path: '', component: Login, data: { hideOverlay: true } },
 { path: 'menu', component: Menu },
 { path: 'create', component: CreateRoom },
 { path: 'join', component: JoinRoom },

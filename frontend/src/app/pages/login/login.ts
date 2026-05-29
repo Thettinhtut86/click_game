@@ -17,15 +17,19 @@ export class Login {
 login() {
   if (!this.name.trim()) return;
 
-
-
   // Call REST login first
    this.api.login(this.name).subscribe(res => {
 
     sessionStorage.setItem('playerName', res.userName);
-    sessionStorage.setItem('playerId', res.userId);
-    sessionStorage.setItem('playerColor', res.color); 
-     this.ws.connect(this.name);
+    sessionStorage.setItem('playerId', res.user_id);
+    sessionStorage.setItem('playerColor', res.color);
+    sessionStorage.setItem('token', res.token);
+     
+      this.ws.connect(
+        res.userName,
+        res.token,
+        res.user_id
+      );
      this.router.navigate(['/menu']);
     //  this.cursorService.applyGlobalCursor(res.color);
     });
