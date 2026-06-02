@@ -1083,8 +1083,7 @@ async def websocket_endpoint(ws: WebSocket):
                     rid,
                     "Host disconnected"
                 )
-        break
-    
+                break
 
         await broadcast_online_users()
         await broadcast_rooms()

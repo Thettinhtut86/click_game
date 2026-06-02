@@ -121,6 +121,12 @@ send(data: any) {
     });
   }
 
+  requestRooms() {
+    this.send({
+      action: 'get_rooms'
+    });
+  }
+
   leaveRoom(roomId: string) {
     this.send({
       action: 'leave_room',

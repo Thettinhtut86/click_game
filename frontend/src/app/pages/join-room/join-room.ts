@@ -37,23 +37,37 @@ export class JoinRoom implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
-    // INITIAL LOAD
-    this.loadRooms();
+
+    this.loading = true;
+
+    this.ws.requestRooms();
     // LIVE WS UPDATES
     this.sub = this.ws.messages$.subscribe(msg => {
       if (!msg) return;
       // FULL ROOM LIST UPDATE
-      if (msg.action === 'rooms_update') {
-        this.rooms = (msg.rooms || []).filter(
-          (r: Room) => r.player_count < 4
-        );
-        this.loading = false;
-      }
-      // ROOM CLOSED
-      if (msg.action === 'room_closed') {
-        this.rooms = this.rooms.filter(
-          r => r.id != msg.roomId
-        );
+      switch (msg.action) {
+
+        case 'rooms_update':
+          this.rooms = (msg.rooms || [])
+            .filter((r: Room) => r.player_count < 4);
+          this.loading = false;
+          break;
+
+        case 'room_closed':
+          this.rooms = this.rooms.filter(r => r.id !== Number(msg.roomId));
+          break;
+
+        case 'join_ack':
+          this.router.navigate(['/room',msg.roomId]);
+          break;
+
+        case 'watcher_joined':
+          this.router.navigate(['/room',msg.roomId]);
+          break;
+
+        case 'error':
+          alert(msg.message || 'Operation failed');
+          break;
       }
     });
   }
@@ -62,25 +76,9 @@ export class JoinRoom implements OnInit, OnDestroy {
     this.sub?.unsubscribe();
   }
 
-  loadRooms() {
-    this.loading = true;
-    this.api.listRooms().subscribe({
-      next: (res: Room[]) => {
-        this.rooms = res.filter(
-          r => r.player_count < 4
-        );
-        this.loading = false;
-      },
-      error: () => {
-        this.loading = false;
-      }
-    });
-  }
-
   join(roomId: number) {
 
     this.ws.joinRoom(roomId.toString());
-    this.router.navigate(['/room', roomId]);
   }
 
   back() {
