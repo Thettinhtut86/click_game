@@ -16,19 +16,12 @@ export class ApiService {
     return this.http.post(`${this.base}/logout`, { user_id: userId });
   }
 
-  createRoom(userId: string, userName: string, option: string): Observable<any> {
-    return this.http.post(`${this.base}/rooms/create`, { user_id: userId, user_name: userName, option: option });
+  createRoom(userId: string, userName: string, option: string, token: string): Observable<any> {
+    const headers = {Authorization: `Bearer ${token}`};
+    return this.http.post(`${this.base}/rooms/create`, { user_id: userId, user_name: userName, option: option },{ headers });
   }
 
   listRooms(): Observable<any> {
     return this.http.get(`${this.base}/rooms`);
-  }
-
-  getRoom(roomId: string): Observable<any> {
-    return this.http.get(`${this.base}/rooms/${roomId}`);
-  }
-
-  getPlayerByName(name: string): Observable<any> {
-    return this.http.get(`${this.base}/players/${name}`);
   }
 }

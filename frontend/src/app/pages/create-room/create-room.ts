@@ -23,7 +23,9 @@ export class CreateRoom {
   createRoom() {
     const uid = sessionStorage.getItem('playerId')!;
     const name = sessionStorage.getItem('playerName')!;
-    this.api.createRoom(uid, name, this.option).subscribe(res => {
+    const token = sessionStorage.getItem('token')!;
+
+    this.api.createRoom(uid, name, this.option,token).subscribe(res => {
       const roomId = res.room_id;
       sessionStorage.setItem('roomOption', this.option);
       this.router.navigate(['/room', roomId]);

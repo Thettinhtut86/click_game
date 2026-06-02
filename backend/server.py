@@ -30,6 +30,23 @@ PLAYER_COLORS = [
     "#1d0a0a", "#fabebe", "#008080", "#2600ff"
 ]
 
+ACTION_HANDLERS = {
+    "handshake": lambda ws, uid, name, data: handle_handshake(ws, uid, name),
+    "create_room": lambda ws, uid, name, data: handle_create_room(ws, uid, name, data),
+    "join_room": lambda ws, uid, name, data: handle_join_room(ws, uid, name, data),
+    "leave_room": lambda ws, uid, name, data: handle_leave_room(ws, uid, data),
+    "start_game": lambda ws, uid, name, data: handle_start_game(ws, uid, data),
+    "quit_room": lambda ws, uid, name, data: handle_quit_room(ws, uid, data),
+    "select_bubble": lambda ws, uid, name, data: handle_select_bubble(ws, uid, data),
+    "send_message": lambda ws, uid, name, data: handle_send_message(ws, uid, name, data),
+    "load_chat": lambda ws, uid, name, data: send_chat_history(ws),
+    "typing_start": lambda ws, uid, name, data: handle_typing_start(uid, name),
+    "typing_stop": lambda ws, uid, name, data: handle_typing_stop(uid, name),
+    "delete_message": lambda ws, uid, name, data: handle_delete_message(uid, data),
+    "restore_message": lambda ws, uid, name, data: handle_restore_message(uid, data),
+    "get_rooms": lambda ws, uid, name, data: broadcast_rooms(),
+}
+
 # ---------- FastAPI Setup ----------
 app = FastAPI()
 app.add_middleware(
@@ -214,9 +231,13 @@ async def broadcast_rooms():
     """Broadcast room list update to all clients."""
     try:
         rooms = execute(
-            """SELECT r.id, r.host_id, r.created_at, COUNT(p.id) AS player_count
-               FROM rooms r LEFT JOIN players p ON r.id = p.room_id
-               GROUP BY r.id""",
+            """SELECT r.id, r.host_id, r.created_at, p.name AS hostname ,COUNT(p.id) AS player_count
+               FROM rooms r 
+               LEFT JOIN players p ON p.id = r.host_id
+               LEFT JOIN players pl ON pl.room_id = r.id
+               GROUP BY r.id, r.host_id, p.name, r.created_at
+               ORDER BY r.id DESC
+               """,
             fetch=True, dictionary=True
         ) or []
     except Exception as e:
@@ -284,6 +305,7 @@ async def remove_player_from_room(player_id: str, room_id: str = None):
                 rooms_state.pop(rid, None)
                 try:
                     execute("DELETE FROM rooms WHERE id=%s", (rid,), commit=True)
+                    await broadcast_rooms()
                 except Exception:
                     logger.exception("Failed to delete empty room")
             else:
@@ -830,32 +852,10 @@ async def handle_ws_action(ws: WebSocket, player_id: str, player_name: str, data
     
     logger.info("WS action=%s from=%s", action, uid)
     
-    if action == "handshake":
-        await handle_handshake(ws, uid, name)
-    elif action == "create_room":
-        await handle_create_room(ws, uid, name, data)
-    elif action == "join_room":
-        await handle_join_room(ws, uid, name, data)
-    elif action == "leave_room":
-        await handle_leave_room(ws, uid, data)
-    elif action == "start_game":
-        await handle_start_game(ws, uid, data)
-    elif action == "quit_room":
-        await handle_quit_room(ws, uid, data)
-    elif action == "select_bubble":
-        await handle_select_bubble(ws, uid, data)
-    elif action == "send_message":
-        await handle_send_message(ws, uid, name, data)
-    elif action == "load_chat":
-        await send_chat_history(ws)
-    elif action == "typing_start":
-        await handle_typing_start(uid, name)
-    elif action == "typing_stop":
-        await handle_typing_stop(uid, name)
-    elif action == "delete_message":
-        await handle_delete_message(uid, data)
-    elif action == "restore_message":
-        await handle_restore_message(uid, data)      
+    handler = ACTION_HANDLERS.get(action)
+
+    if handler:
+        await handler(ws, uid, name, data)
     else:
         await ws.send_text(json.dumps({"action": "error", "message": f"Unknown action: {action}"}))
 
@@ -996,7 +996,7 @@ def create_room(payload: dict = Body(...), authorization: str = Header(None)):
                 }
             ],
         })
-        
+        asyncio.create_task(broadcast_rooms())
         return {"room_id": room_id}
     except Exception as e:
         logger.exception(e)
@@ -1014,31 +1014,6 @@ def list_rooms():
     except Exception as e:
         logger.exception("Failed to list rooms: %s", e)
         return []
-
-@app.get("/rooms/{room_id}")
-def get_room(room_id: int):
-    try:
-        room = execute("SELECT id, host_id, created_at FROM rooms WHERE id=%s", (room_id,), fetch=True, dictionary=True)
-        if not room:
-            return {"status": "error", "message": "room not found"}
-        
-        players = execute("SELECT id, name FROM players WHERE room_id=%s", (room_id,), fetch=True, dictionary=True) or []
-        return {"id": room_id, "host_id": room[0]["host_id"], "players": players}
-    except Exception as e:
-        logger.exception("Failed to get room: %s", e)
-        return {"status": "error", "message": "db error"}
-
-@app.get("/players/{name}")
-def get_player_by_name(name: str):
-    try:
-        row = execute(
-            "SELECT id, name FROM players WHERE name=%s ORDER BY joined_at DESC LIMIT 1",
-            (name,), fetch=True, dictionary=True
-        )
-        return row[0] if row else {"status": "error", "message": "player not found"}
-    except Exception as e:
-        logger.exception("Failed to fetch player: %s", e)
-        return {"status": "error", "message": "db error"}
 
 # ---------- WebSocket Endpoint ----------
 @app.websocket("/ws")
@@ -1099,6 +1074,17 @@ async def websocket_endpoint(ws: WebSocket):
 
         except Exception:
             logger.exception("cleanup failed")
+
+        for rid, room in list(rooms_state.items()):
+
+            if str(room.get("host")) == str(player_id):
+
+                await close_room(
+                    rid,
+                    "Host disconnected"
+                )
+        break
+    
 
         await broadcast_online_users()
         await broadcast_rooms()
