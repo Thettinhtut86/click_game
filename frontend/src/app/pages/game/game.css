@@ -60,6 +60,13 @@
     transition: background 0.2s ease;
 }
 
+.no-bubbles {
+    padding: 1rem;
+    font-weight: 600;
+    color: #777;
+    text-align: center;
+}
+
 .player-name {
     margin-left: 0.4rem;
     font-weight: 600;
@@ -96,7 +103,7 @@
     transition: background 0.2s ease;
     font-size: clamp(0.8rem, 2vw, 1rem);
     white-space: nowrap;
-    cursor: inherit !important;
+    cursor: pointer;
 }
 
 .quit-btn:hover {

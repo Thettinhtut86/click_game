@@ -39,7 +39,7 @@ export class WebSocket {
 
     this.socket = webSocket({
 
-    url: `ws://192.168.250.1:8000/ws?token=${token}`,
+    url: `ws://192.168.250.3:8000/ws?token=${token}`,
 
       serializer: (msg: any) => JSON.stringify(msg),
       deserializer: ({ data }) => JSON.parse(data),
@@ -106,11 +106,15 @@ send(data: any) {
     this.socket?.complete();
   }
 
-  createRoom(roomId: string, option: 'asc' | 'desc' = 'asc') {
+  createRoom(option: 'asc' | 'desc' = 'asc') {
+    console.log("userId: ", this.userId);
+    console.log("userName: ", this.userName);
+    console.log();
     this.send({
       action: 'create_room',
-      roomId,
-      option
+      option,
+      userId: this.userId,      
+      userName: this.userName
     });
   }
 
@@ -122,9 +126,9 @@ send(data: any) {
   }
 
   requestRooms() {
-    this.send({
-      action: 'get_rooms'
-    });
+    const msg = { action: 'get_rooms' };
+    console.log("SEND WS:", msg);
+    this.send(msg);
   }
 
   leaveRoom(roomId: string) {

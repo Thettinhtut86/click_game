@@ -1,8 +1,8 @@
-import { Component } from '@angular/core';
-
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
+import { Subscription } from 'rxjs';
+
 import { WebSocket } from '../../services/web-socket';
-import { ApiService } from '../../services/api.service';
 
 @Component({
   selector: 'app-create-room',
@@ -10,86 +10,121 @@ import { ApiService } from '../../services/api.service';
   templateUrl: './create-room.html',
   styleUrl: './create-room.css'
 })
-  
-  
-export class CreateRoom {
+export class CreateRoom implements OnInit, OnDestroy {
+
   option: 'asc' | 'desc' = 'asc';
+
   uid = sessionStorage.getItem('playerId')!;
   name = sessionStorage.getItem('playerName')!;
 
+  creating = false;
 
-  constructor(private router: Router,private ws: WebSocket, private api: ApiService) {}
+  private sub?: Subscription;
 
-  createRoom() {
-    const uid = sessionStorage.getItem('playerId')!;
-    const name = sessionStorage.getItem('playerName')!;
-    const token = sessionStorage.getItem('token')!;
+  constructor(
+    private router: Router,
+    private ws: WebSocket
+  ) {}
 
-    this.api.createRoom(uid, name, this.option,token).subscribe(res => {
-      const roomId = res.room_id;
-      sessionStorage.setItem('roomOption', this.option);
-      this.router.navigate(['/room', roomId]);
-    }); 
+  ngOnInit(): void {
+
+    this.sub = this.ws.messages$.subscribe(msg => {
+      if (!msg) return;
+      switch (msg.action) {
+        case 'room_created':
+          this.creating = false;
+          sessionStorage.setItem('roomId', msg.roomId);
+          sessionStorage.setItem('hostId', msg.hostId);
+          sessionStorage.setItem('roomOption', this.option);
+          this.router.navigate(['/room',msg.roomId]);
+          break;
+
+        case 'error':
+          this.creating = false;
+          alert(msg.message);
+          break;
+      }
+    });
   }
-  back() { this.router.navigate(['/menu']); }
+
+  ngOnDestroy(): void {
+    this.sub?.unsubscribe();
+  }
+
+  createRoom(): void {
+    if (this.creating) return;
+    this.creating = true;
+    this.ws.createRoom(this.option);
+  }
+
+  back(): void {
+    this.router.navigate(['/menu']);
+  }
 
   onBtnEnter(e: MouseEvent) {
-  this.updateBtnShadow(e);
-  const el = e.currentTarget as HTMLElement;
-  el.classList.add('hovered'); 
-}
+    this.updateBtnShadow(e);
+    const el = e.currentTarget as HTMLElement;
+    el.classList.add('hovered');
+  }
 
-onBtnMove(e: MouseEvent) {
-  const el = e.currentTarget as HTMLElement;
-  const rect = el.getBoundingClientRect();
+  onBtnMove(e: MouseEvent) {
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
 
-  const x = ((e.clientX - rect.left) / rect.width) * 100;
-  const y = ((e.clientY - rect.top) / rect.height) * 100;
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-  el.style.setProperty('--x', `${x}%`);
-  el.style.setProperty('--y', `${y}%`);
-}
+    el.style.setProperty('--x', `${x}%`);
+    el.style.setProperty('--y', `${y}%`);
+  }
 
-resetLight(e: MouseEvent) {
-  const el = e.currentTarget as HTMLElement;
-  el.classList.remove('hovered'); 
-  el.style.removeProperty('--x');
-  el.style.removeProperty('--y');
-  el.style.setProperty('--shadow-opacity', '0.35'); // reset shadow
-  el.style.setProperty('--shadow-spread', '16px');   // reset spread
-}
+  resetLight(e: MouseEvent) {
+    const el = e.currentTarget as HTMLElement;
 
-private updateBtnShadow(e: MouseEvent) {
-  const el = e.currentTarget as HTMLElement;
-  const rect = el.getBoundingClientRect();
+    el.classList.remove('hovered');
+    el.style.removeProperty('--x');
+    el.style.removeProperty('--y');
+    el.style.setProperty('--shadow-opacity', '0.35');
+    el.style.setProperty('--shadow-spread', '16px');
+  }
 
-  // Cursor relative to button center (-1 → 1)
-  const cx = (e.clientX - rect.left - rect.width/2) / (rect.width/2);
-  const cy = (e.clientY - rect.top - rect.height/2) / (rect.height/2);
+  private updateBtnShadow(e: MouseEvent) {
 
-  // Distance from center
-  const distance = Math.sqrt(cx*cx + cy*cy); // 0 (center) → ~1.4 (corner)
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
 
-  // Map distance to shadow opacity (0.35 → 0.7)
-  const minOpacity = 0.35;
-  const maxOpacity = 0.7;
-  const shadowOpacity = minOpacity + (maxOpacity - minOpacity) * distance;
+    const cx =
+      (e.clientX - rect.left - rect.width / 2) /
+      (rect.width / 2);
 
-  // Map distance to shadow spread (optional: more spread near edges)
-  const minSpread = 16;
-  const maxSpread = 35;
-  const shadowSpread = minSpread + (maxSpread - minSpread) * distance;
+    const cy =
+      (e.clientY - rect.top - rect.height / 2) /
+      (rect.height / 2);
 
-  el.style.setProperty('--shadow-opacity', `${shadowOpacity}`);
-  el.style.setProperty('--shadow-spread', `${shadowSpread}px`);
-}
+    const distance = Math.sqrt(cx * cx + cy * cy);
 
-private updateLightPosition(e: MouseEvent) {
-  const el = e.currentTarget as HTMLElement;
-  const rect = el.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  el.style.setProperty('--x', `${x}px`);
-  el.style.setProperty('--y', `${y}px`);
+    const minOpacity = 0.35;
+    const maxOpacity = 0.7;
+
+    const shadowOpacity =
+      minOpacity +
+      (maxOpacity - minOpacity) * distance;
+
+    const minSpread = 16;
+    const maxSpread = 35;
+
+    const shadowSpread =
+      minSpread +
+      (maxSpread - minSpread) * distance;
+
+    el.style.setProperty(
+      '--shadow-opacity',
+      `${shadowOpacity}`
+    );
+
+    el.style.setProperty(
+      '--shadow-spread',
+      `${shadowSpread}px`
+    );
   }
 }

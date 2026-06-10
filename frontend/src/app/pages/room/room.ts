@@ -12,14 +12,14 @@ import { WebSocket } from '../../services/web-socket';
 })
 export class Room implements OnInit, OnDestroy {
 
-  roomId!: string;
+  
 
   players: any[] = [];
 
-  hostId: string | null = null;
-
   uid = sessionStorage.getItem('playerId')!;
   uname = sessionStorage.getItem('playerName')!;
+  roomId = sessionStorage.getItem('roomId')!;
+  hostId = sessionStorage.getItem('hostId')!;
 
   private sub!: Subscription;
   private leaving = false;
@@ -32,23 +32,19 @@ export class Room implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
-
-    this.roomId = this.route.snapshot.params['id'];
-    this.ws.joinRoom(this.roomId);
-      this.sub = this.ws.messages$.subscribe(msg => {
+    this.sub = this.ws.messages$.subscribe(msg => {
     if (!msg) return;
 
     // ROOM UPDATE
     if (msg.action === 'room_update' && msg.roomId === this.roomId) {
       this.players = msg.players || [];
-      this.hostId = msg.hostId;
-    }
-    
-    console.log("this player:",this.players);
+      // this.hostId = msg.hostId;
+      }
 
     // GAME START
     if (msg.action === 'game_started' && msg.roomId === this.roomId) {
       this.gameStarting = true;      
+      
       this.router.navigate(['/game', this.roomId]);
     }
 
@@ -61,12 +57,7 @@ export class Room implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
-
     this.sub?.unsubscribe();
-    // PREVENT DOUBLE LEAVE
-    if (this.leaving && !this.gameStarting){
-      this.ws.leaveRoom(this.roomId);
-    }
   }
 
   startGame() {
@@ -77,6 +68,8 @@ export class Room implements OnInit, OnDestroy {
   back() {
     this.leaving = true;
     this.ws.leaveRoom(this.roomId);
+    sessionStorage.removeItem('hostId');
+    sessionStorage.removeItem('roomId');
     this.router.navigate(['/menu']);
   }
 }

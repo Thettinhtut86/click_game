@@ -19,6 +19,7 @@ login() {
 
   // Call REST login first
    this.api.login(this.name).subscribe(res => {
+    console.log('LOGIN RESPONSE:', res);
 
     sessionStorage.setItem('playerName', res.userName);
     sessionStorage.setItem('playerId', res.user_id);

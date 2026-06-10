@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 
@@ -32,15 +32,14 @@ export class JoinRoom implements OnInit, OnDestroy {
 
   constructor(
     private ws: WebSocket,
-    private api: ApiService,
-    private router: Router
+    private router: Router,
+    private cd: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
 
     this.loading = true;
-
-    this.ws.requestRooms();
+    
     // LIVE WS UPDATES
     this.sub = this.ws.messages$.subscribe(msg => {
       if (!msg) return;
@@ -48,21 +47,32 @@ export class JoinRoom implements OnInit, OnDestroy {
       switch (msg.action) {
 
         case 'rooms_update':
-          this.rooms = (msg.rooms || [])
-            .filter((r: Room) => r.player_count < 4);
+          this.rooms = [...(msg.rooms || [])]
+            .filter((r: any) => Number(r.player_count || 0) < 4);
           this.loading = false;
+
+          queueMicrotask(() => {
+            this.cd.detectChanges();
+          });
           break;
+        
 
         case 'room_closed':
           this.rooms = this.rooms.filter(r => r.id !== Number(msg.roomId));
           break;
 
         case 'join_ack':
+          sessionStorage.setItem('roomId',msg.roomId.toString());
           this.router.navigate(['/room',msg.roomId]);
           break;
 
         case 'watcher_joined':
           this.router.navigate(['/room',msg.roomId]);
+          break;
+        
+        case 'room_created':
+          this.router.navigate(['/room',msg.roomId]);
+
           break;
 
         case 'error':
@@ -70,8 +80,12 @@ export class JoinRoom implements OnInit, OnDestroy {
           break;
       }
     });
+    this.ws.requestRooms();
   }
 
+  trackByRoomId(index: number, room: Room) {
+    return room.id;
+  }
   ngOnDestroy() {
     this.sub?.unsubscribe();
   }

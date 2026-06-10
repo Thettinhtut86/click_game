@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("bubble-game")
 
 DB_CONFIG = {
-    "host": "localhost",
+    "host": "192.168.250.3",
     "user": "root",
     "password": "root",
     "database": "live_game"
@@ -44,7 +44,7 @@ ACTION_HANDLERS = {
     "typing_stop": lambda ws, uid, name, data: handle_typing_stop(uid, name),
     "delete_message": lambda ws, uid, name, data: handle_delete_message(uid, data),
     "restore_message": lambda ws, uid, name, data: handle_restore_message(uid, data),
-    "get_rooms": lambda ws, uid, name, data: broadcast_rooms(),
+    "get_rooms": lambda ws, uid, name, data: handle_get_rooms(ws, uid, name, data),
 }
 
 # ---------- FastAPI Setup ----------
@@ -89,6 +89,30 @@ def execute(query: str, params: tuple = None, fetch: bool = False, dictionary: b
             cursor.close()
         if conn:
             conn.close()
+
+def get_rooms_data():
+    rooms = execute(
+        """
+        SELECT r.id,
+               r.host_id,
+               h.name AS host_name,
+               r.created_at,
+               COUNT(p.id) AS player_count
+        FROM rooms r
+        LEFT JOIN players p ON p.room_id = r.id
+        LEFT JOIN players h ON h.id = r.host_id
+        GROUP BY r.id, r.host_id, h.name, r.created_at
+        ORDER BY r.id DESC
+        """,
+        fetch=True,
+        dictionary=True
+    ) or []
+
+    for room in rooms:
+        if room.get("created_at"):
+            room["created_at"] = room["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+
+    return rooms            
 
 def serialize_player(p: dict) -> dict:
     return {
@@ -165,7 +189,6 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-
 def verify_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -210,17 +233,15 @@ async def broadcast_to_room(room_id: str, message: dict):
     if not room:
         return
     
-    for player in room["players"]:
-        ws = connected_clients.get(str(player["id"]))
-        if ws:
-            try:
-                await ws.send_text(json.dumps(message))
-            except Exception:
-                pass
-    
-    # Also broadcast to watchers
-    for watcher in room.get("watchers", []):
-        ws = connected_clients.get(str(watcher["id"]))
+    targets = set()
+    for p in room["players"]:
+        targets.add(str(p["id"]))
+
+    for w in room.get("watchers", []):
+        targets.add(str(w["id"]))
+
+    for uid in targets:
+        ws = connected_clients.get(uid)
         if ws:
             try:
                 await ws.send_text(json.dumps(message))
@@ -228,23 +249,7 @@ async def broadcast_to_room(room_id: str, message: dict):
                 pass
 
 async def broadcast_rooms():
-    """Broadcast room list update to all clients."""
-    try:
-        rooms = execute(
-            """SELECT r.id, r.host_id, r.created_at, p.name AS hostname ,COUNT(p.id) AS player_count
-               FROM rooms r 
-               LEFT JOIN players p ON p.id = r.host_id
-               LEFT JOIN players pl ON pl.room_id = r.id
-               GROUP BY r.id, r.host_id, p.name, r.created_at
-               ORDER BY r.id DESC
-               """,
-            fetch=True, dictionary=True
-        ) or []
-    except Exception as e:
-        logger.exception("Failed to fetch rooms: %s", e)
-        rooms = []
-    
-    await broadcast_to_all({"action": "rooms_update", "rooms": rooms})
+    await broadcast_to_all({"action": "rooms_update", "rooms": get_rooms_data()})
 
 async def broadcast_room_update(room_id: str):
     """Broadcast updated room state to all connected clients."""
@@ -407,6 +412,7 @@ async def handle_handshake(ws: WebSocket, uid: str, name: str):
 async def handle_create_room(ws: WebSocket, uid: str, name: str, data: dict):
     """Handle room creation via WebSocket."""
     try:
+        option = data.get("option", "asc")
         room_id = str(execute(
             "INSERT INTO rooms (host_id, created_at) VALUES (%s, NOW())",
             (uid,), commit=True
@@ -420,8 +426,8 @@ async def handle_create_room(ws: WebSocket, uid: str, name: str, data: dict):
         
         rooms_state[room_id] = ensure_room({
             "host": uid,
-            "players": [player_info],
-            "option": data.get("option", "asc")
+            "option": option,
+            "players": [player_info]
         })
         
         await ws.send_text(json.dumps({
@@ -430,7 +436,6 @@ async def handle_create_room(ws: WebSocket, uid: str, name: str, data: dict):
             "hostId": uid
         }))
         
-        await broadcast_rooms()
         await broadcast_room_update(room_id)
         
     except Exception as e:
@@ -843,7 +848,13 @@ async def mark_seen(uid: str):
     execute("""
         UPDATE chat_unread SET unread_count=0 WHERE user_id=%s
     """, (uid,), commit=True)
-    
+
+async def handle_get_rooms(ws: WebSocket, uid: str, name: str, data: dict):
+    await ws.send_text(json.dumps({
+        "action": "rooms_update",
+        "rooms": get_rooms_data()
+    }))  
+
 async def handle_ws_action(ws: WebSocket, player_id: str, player_name: str, data: dict):
     """Route WebSocket actions to appropriate handlers."""
     action = data.get("action")
@@ -968,40 +979,6 @@ def logout(background_tasks: BackgroundTasks, payload: dict = Body(...)):
         logger.exception("Logout failed: %s", e)
         return {"status": "error", "message": "db error"}
 
-@app.post("/rooms/create")
-def create_room(payload: dict = Body(...), authorization: str = Header(None)):
-    try:
-        user = get_token_from_header(authorization)
-
-        uid = norm_id(user["user_id"])
-        room_id = str(execute(
-            "INSERT INTO rooms (host_id, created_at) VALUES (%s, NOW())",
-            (uid,), commit=True
-        ))
-        
-        execute("UPDATE players SET room_id=%s WHERE id=%s", (room_id, uid), commit=True)
-        player_row = execute(
-            "SELECT id, name, color FROM players WHERE id=%s",
-            (uid,), fetch=True, dictionary=True
-        )
-        option = payload.get("option", "asc")
-        rooms_state[room_id] = ensure_room({
-            "host": uid,
-            "option": option,
-            "players": [
-                {
-                    "id": uid,
-                    "name": player_row[0]["name"] if player_row else "Unknown",
-                    "color": player_row[0]["color"] if player_row else None
-                }
-            ],
-        })
-        asyncio.create_task(broadcast_rooms())
-        return {"room_id": room_id}
-    except Exception as e:
-        logger.exception(e)
-        return {"error": "create_room_failed"}
-
 @app.get("/rooms")
 def list_rooms():
     try:
@@ -1037,6 +1014,7 @@ async def websocket_endpoint(ws: WebSocket):
     
     await ws.accept()
     connected_clients[player_id] = ws
+    ws.scope["player_id"] = player_id
     await broadcast_online_users()
     await mark_seen(player_id)
     await broadcast_rooms()
