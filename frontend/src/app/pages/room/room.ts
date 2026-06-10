@@ -44,7 +44,7 @@ export class Room implements OnInit, OnDestroy {
     // GAME START
     if (msg.action === 'game_started' && msg.roomId === this.roomId) {
       this.gameStarting = true;      
-      
+      this.ws.currentGameState = msg;
       this.router.navigate(['/game', this.roomId]);
     }
 

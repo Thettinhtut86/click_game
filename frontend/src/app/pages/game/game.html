@@ -31,7 +31,7 @@
 
                 <div *ngIf="!displayOrder || displayOrder.length === 0" class="no-bubbles">
                     Waiting for game to start or no bubbles received...
-                    "roomId :"{{roomId}}
+                    "displayOrder :"{{displayOrder}}
                 </div>
 
                 <div *ngFor="let n of displayOrder" class="bubble" [style.background]="bubbleColor('B' + n)"

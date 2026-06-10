@@ -45,14 +45,13 @@ export class Game implements OnInit, OnDestroy {
     }
 
     this.ws.messages$.subscribe((msg: any) => {
-    console.log("msg action:", msg.action);
+    // console.log("msg action:", msg.action);
     if (!msg) return;
-
     this.zone.run(() => {
       switch (msg.action) {
         
         case 'game_started':
-          if (msg.roomId === this.roomId) {
+         if (String(msg.roomId) === String(this.roomId)) {
             this.loadGame(msg);
           }          
           break;
@@ -87,7 +86,6 @@ export class Game implements OnInit, OnDestroy {
 
     this.option = msg.option;
     this.displayOrder = msg.display_order || [];
-    console.log("displayOrder:", this.displayOrder);
     this.playOrder = msg.play_order || [];
 
     this.gameStarted = true;

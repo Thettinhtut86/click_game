@@ -127,7 +127,7 @@ send(data: any) {
 
   requestRooms() {
     const msg = { action: 'get_rooms' };
-    console.log("SEND WS:", msg);
+    // console.log("SEND WS:", msg);
     this.send(msg);
   }
 
@@ -139,10 +139,12 @@ send(data: any) {
   }
 
   startGame(roomId: string) {
-    this.send({
+    const msg = {
       action: 'start_game',
       roomId
-    });
+     };
+    // console.log("SEND WS:", msg);    
+    this.send(msg);
   }
 
   selectBubble(roomId: string, bubbleId: string) {
