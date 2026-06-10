@@ -49,12 +49,12 @@
     border-radius: 0.7rem;
     padding: 0.6rem 1rem;
     font-weight: 600;
-    background: #eee;
+    background: #ee0000;
     font-size: 0.9rem;
 }
 
 .back-btn:hover {
-    background: #ddd;
+    background: #f8593dd5;
 }
 
 /* ---------- Chat area ---------- */

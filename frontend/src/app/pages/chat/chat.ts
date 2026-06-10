@@ -1,6 +1,7 @@
-import { Component, ElementRef, HostListener, ViewChild } from '@angular/core';
+import { Component, ElementRef, HostListener, ViewChild, OnInit, OnDestroy } from '@angular/core';
 import { WebSocket } from '../../services/web-socket';
 import { Router } from '@angular/router';
+import { Title } from '@angular/platform-browser';
 
 @Component({
   selector: 'app-chat',
@@ -24,21 +25,23 @@ export class Chat {
   openedMenuId: number | null = null;
   showOnlyMyMessages = false;
 
-  constructor(private ws: WebSocket, private router: Router) { }
+  constructor(private ws: WebSocket, private router: Router,private titleService: Title) { }
 
   ngOnInit() {
+    // this.titleService.setTitle('Daily Chat');
+
     this.ws.send({
       action: 'load_chat'
     });
 
     this.ws.messages$.subscribe((msg: any) => {
-
       if (!msg) return;
 
       if (msg.action === 'init_chat') {
       const map = new Map();
 
-      for (const m of msg.messages || []) {
+        for (const m of msg.messages || []) {
+        m.uid = String(m.uid);
         map.set(m.id, m);
       }
 
@@ -47,6 +50,9 @@ export class Chat {
     }
 
       if (msg.action === 'new_message') {
+        if (msg.message) {
+          msg.message.uid = String(msg.message.uid); 
+        }        
         const shouldScroll = this.isNearBottom();
 
         this.messages.push(msg.message);
@@ -60,7 +66,7 @@ export class Chat {
       }
 
       if (msg.action === 'typing_start') {
-        if (msg.uid === this.uid) return;
+        if (String(msg.uid) === String(this.uid)) return;
         if (!this.typingUsers.includes(msg.name)) {
           this.typingUsers.push(msg.name);
         }
@@ -93,6 +99,12 @@ export class Chat {
     });
 
   }
+
+  // clearUnread() {
+  //   this.unreadCount = 0;
+  //   this.titleService.setTitle('Daily Chat');
+  // }
+
   sendMessage() {
       if (!this.chatText.trim()) return;
       if (this.typingSent) {
@@ -202,7 +214,7 @@ export class Chat {
 
   ngOnDestroy() {
     clearTimeout(this.typingTimeout);
-
+    // this.titleService.setTitle('ClickGame');
     if (this.typingSent) {
       this.ws.send({
         action: 'typing_stop'

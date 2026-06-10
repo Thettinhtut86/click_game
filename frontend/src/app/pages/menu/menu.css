@@ -96,11 +96,24 @@ button {
     border: none;
     border-radius: 0.6em;
     font-weight: 600;
-    transition: all 0.3s ease;
     background: linear-gradient(135deg, #007bff, #0056b3);
     color: #fff;
     box-shadow: 0 0.5em 1em rgba(0, 123, 255, 0.3);
     cursor: inherit !important;
+    transition: all 0.2s ease;
+
+    /* New rules: Ensures text alignment stays consistent when the arrow toggles */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+button.active {
+    background: linear-gradient(135deg, #3399ff, #007bff);
+    transform: translateY(-0.15em);
+    box-shadow: 0 0.8em 1.2em rgba(0, 123, 255, 0.5);
+    outline: 2px solid #fff;
+    /* White ring to emphasize keyboard selection */
 }
 
 button:hover {
@@ -111,6 +124,7 @@ button:hover {
 
 button:active {
     transform: scale(0.97);
+    background: linear-gradient(135deg, #0056b3, #004085);
 }
 
 /* Responsive tweaks */
@@ -147,4 +161,21 @@ button:active {
     font-weight: bold;
 
     padding: 0 0.3em;
+}
+.arrow {
+    position: absolute;
+    left: 1em;
+    /* Locks the arrow to the left edge of the button */
+    display: inline-block;
+    animation: blink 0.6s infinite alternate;
+}
+
+@keyframes blink {
+    0% {
+        opacity: 0.3;
+    }
+
+    100% {
+        opacity: 1;
+    }
 }

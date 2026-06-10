@@ -20,6 +20,20 @@ export class WebSocket {
 
   public connectionState$ = new Subject<'connected' | 'connecting' | 'disconnected'>();
 
+  constructor() {
+    this.restoreConnection();
+  }
+  private restoreConnection() {
+    const token = sessionStorage.getItem('token');
+    const userName = sessionStorage.getItem('playerName');
+    const userId = sessionStorage.getItem('playerId');
+
+    // If session data exists, we survived a refresh. Reconnect immediately.
+    if (token && userName) {
+      this.connect(userName, token, userId || undefined);
+    }
+  }
+
   connect(userName: string, token: string, userId?: string) {
     if (this.connected || this.connecting) return;
     
@@ -50,10 +64,10 @@ export class WebSocket {
 
           this.connected = true;
           this.connecting = false;
-
           this.reconnectAttempts = 0;
-
           this.connectionState$.next('connected');
+          
+          this.send({ action: 'handshake', userName: this.userName });
         }
       },
 
