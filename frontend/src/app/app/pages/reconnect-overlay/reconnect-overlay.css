@@ -1,0 +1,118 @@
+.overlay {
+    position: fixed;
+    inset: 0;
+    /* Light white translucent backdrop – blends with pale background */
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.box {
+    /* Frosted white glass */
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 138, 138, 0.35);
+    /* pale red border */
+    border-radius: 30px;
+    padding: 40px 44px;
+    text-align: center;
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.08),
+        /* soft shadow, not heavy */
+        inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+        0 0 25px rgba(255, 150, 150, 0.2);
+    /* pale red glow */
+    color: #2c2c2c;
+    /* dark text for readability */
+    max-width: 320px;
+    width: 100%;
+    animation: scaleUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.spinner {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 22px;
+    border: 5px solid rgba(0, 0, 0, 0.08);
+    border-top-color: #ff9a9a;
+    /* pale red */
+    border-radius: 50%;
+    animation: spin 0.85s linear infinite;
+    box-shadow: 0 0 20px rgba(255, 140, 140, 0.3);
+    transition: border-top-color 0.3s, box-shadow 0.3s;
+}
+
+h3 {
+    margin: 0 0 8px;
+    font-size: 1.4rem;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    color: #1e1e1e;
+}
+
+p {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #4a4a4a;
+    line-height: 1.5;
+}
+
+/* Keyframes unchanged */
+@keyframes spin {
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes scaleUp {
+    from {
+        opacity: 0;
+        transform: scale(0.85);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+.overlay.connected .box {
+    border-color: rgba(140, 255, 160, 0.45);
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.06),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+        0 0 25px rgba(140, 255, 160, 0.25);
+}
+
+.overlay.connected .spinner {
+    border-top-color: #8cffa0;
+    /* pale green */
+    box-shadow: 0 0 20px rgba(140, 255, 160, 0.4);
+    animation: none;
+    /* stop spinning, you can replace with checkmark */
+}
+
+.overlay.connected h3 {
+    color: #1e3b1e;
+    /* dark green for contrast */
+}
+
+.overlay.connected p {
+    color: #2c4a2c;
+}

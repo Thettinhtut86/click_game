@@ -1,0 +1,50 @@
+<div class="game-container">
+
+    <div class="main-content">
+
+        <!-- HEADER -->
+        <div class="header">
+
+            <div class="players-container">
+                <div *ngFor="let p of players" class="player-info">
+                    <div class="player-bubble" [style.background]="p.color"></div>
+                    <span class="player-name">{{ p.name }}</span>
+                    <span class="player-score">{{ scores[p.id] || 0 }}</span>
+                </div>
+            </div>
+
+            <!-- FIXED: safe next bubble -->
+            <div class="current-number" *ngIf="gameStarted">
+                Next:
+                <span class="bubble-number">
+                    {{ getNextBubble() }}
+                </span>
+            </div>
+
+            <button class="quit-btn" (click)="quitGame()">Quit Game</button>
+
+        </div>
+
+        <!-- GRID -->
+        <div class="grid-container">
+            <div class="grid">
+
+                <div *ngIf="!displayOrder || displayOrder.length === 0" class="no-bubbles">
+                    Waiting for game to start or no bubbles received...
+                    "displayOrder :"{{displayOrder}}
+                </div>
+
+                <div *ngFor="let n of displayOrder" class="bubble" [style.background]="bubbleColor('B' + n)"
+                    [style.color]="bubbleTextColor('B' + n)"
+                    [style.border-color]="bubbles['B' + n] ? bubbleColor('B' + n) : '#ccc'"
+                    (click)="selectBubble('B' + n)">
+
+                    {{ n }}
+
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+</div>

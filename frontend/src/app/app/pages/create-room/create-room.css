@@ -1,0 +1,230 @@
+/* ---------- LAYER 1 & 2: BACKGROUND & STRIPES ---------- */
+/* Keeping your exact stripe logic from the source */
+.page-wrapper {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #dadada;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+.stripe {
+  position: absolute;
+  inset: -50%;
+  width: 180%;
+  height: 200%;
+  z-index: 0;
+  transform: rotate(45deg);
+  transform-origin: center;
+}
+
+.stripe-1 {
+  background: linear-gradient(135deg, #ff6b6b, #ff4757);
+  clip-path: polygon(0 0, 40% 0, 40% 100%, 0 100%);
+}
+
+.stripe-2 {
+  background: linear-gradient(135deg, #1dd1a1, #10ac84);
+  clip-path: polygon(42% 0, 58% 0, 58% 100%, 42% 100%);
+}
+
+.stripe-3 {
+  background: linear-gradient(135deg, #54a0ff, #2e86de);
+  clip-path: polygon(60% 0, 100% 0, 100% 100%, 60% 100%);
+}
+
+/* Neon lines for stripes */
+.stripe::before,
+.stripe::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: 1px;
+  animation: neonFlicker 3s infinite alternate;
+}
+
+.stripe::before {
+  left: 0;
+}
+
+.stripe::after {
+  right: 0;
+  display: block;
+}
+
+.stripe-1::before,
+.stripe-1::after {
+  background: #54a0ff;
+  box-shadow: 0 0 6px #07fa14dd, 0 0 12px #d0ff00, 0 0 24px rgba(0, 255, 128, 0.7), 0 0 48px rgba(252, 84, 7, 0.836);
+  filter: blur(1.5px);
+}
+
+.stripe-2::before,
+.stripe-2::after {
+  background: #10ac84;
+  box-shadow: 0 0 6px #1dd1a1, 0 0 12px #10ac84, 0 0 24px rgba(16, 172, 132, 0.7), 0 0 48px rgba(16, 172, 132, 0.5);
+}
+
+.stripe-3::before,
+.stripe-3::after {
+  background: #2e86de;
+  box-shadow: 0 0 6px #54a0ff, 0 0 12px #2e86de, 0 0 24px rgba(46, 134, 222, 0.7), 0 0 48px rgba(46, 134, 222, 0.5);
+}
+
+@keyframes neonFlicker {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* ---------- LAYER 3: THE GLASS CARD ---------- */
+.card {
+  position: relative;
+  width: 100%;
+  max-width: 26.25rem;
+  z-index: 10;
+
+  /* Glassmorphism Core */
+  background: rgba(255, 255, 255, 0.45);
+  /* High transparency pale white */
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+
+  border-radius: 1rem;
+  /* Soft outer shadow + subtle inner light highlight */
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+
+  overflow: hidden;
+  animation: cardFade 0.6s ease-out;
+}
+
+/* Glowing edge logic remains but softened for glass */
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 1rem;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(129, 199, 132, 0.5), rgba(100, 181, 246, 0.5));
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: glowPulse 3s ease-in-out infinite alternate;
+}
+
+/* Header - Removed solid background for seamless glass look */
+.card-header {
+  padding: 2rem 1.5rem 1.2rem;
+  text-align: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.card-header h2 {
+  font-size: 1.8rem;
+  color: #1b1b1b;
+  margin: 0;
+}
+
+.subtitle {
+  color: #555;
+  font-size: 0.9rem;
+}
+
+/* Body */
+.card-body {
+  padding: 2rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #444;
+  letter-spacing: 1px;
+}
+
+select {
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(4px);
+  padding: 0.8rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+  font-weight: 600;
+  color: #222;
+}
+
+/* Footer - Removed solid gray background */
+.card-footer {
+  padding: 1.5rem;
+  display: flex;
+  gap: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Buttons - Keeping your logic but slightly higher z-index */
+.btn {
+  flex: 1;
+  padding: 0.85rem;
+  border-radius: 0.7rem;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.3s;
+  color: white;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, #43a047, #2e7d32);
+}
+
+.btn.danger {
+  background: linear-gradient(135deg, #e53935, #b71c1c);
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+}
+
+@keyframes cardFade {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes glowPulse {
+  0% {
+    opacity: 0.4;
+  }
+
+  100% {
+    opacity: 0.8;
+  }
+}

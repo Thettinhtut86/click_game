@@ -1,0 +1,147 @@
+.page-wrapper {
+    position: relative;
+    min-height: 100vh;
+    width: 100%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    background: #dadada;
+}
+
+/* ---------- CONTENT BOX ---------- */
+.content-box {
+    position: relative;
+    z-index: 2;
+    width: min(500px, 90%);
+    padding: 2em;
+    border-radius: 16px;
+
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    text-align: center;
+}
+
+/* ---------- PLAYERS ---------- */
+.players {
+    margin-top: 1em;
+    display: flex;
+    gap: 0.7em;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+/* player bubble */
+.player-bubble {
+    width: 3.2em;
+    height: 3.2em;
+    border-radius: 50%;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    color: #fff;
+    font-weight: bold;
+    font-size: 0.8rem;
+
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
+/* ---------- ACTIONS WRAPPER ---------- */
+.actions {
+    margin-top: 1.5em;
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+}
+
+/* group wrapper for better placement control */
+.action-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8em;
+    align-items: center;
+}
+
+/* ---------- BUTTON BASE ---------- */
+.btn {
+    padding: 0.7em 1.2em;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    min-width: 140px;
+}
+
+/* primary button */
+.btn.primary {
+    background: #2e86de;
+    color: white;
+}
+
+/* secondary button */
+.btn.secondary {
+    background: #e0e0e0;
+    color: #333;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    opacity: 0.95;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ---------- INFO TEXT ---------- */
+.info-text {
+    font-size: 0.9rem;
+    color: #555;
+}
+/* ---------- STRIPES (unchanged) ---------- */
+.stripe {
+    position: absolute;
+    inset: -50%;
+    width: 180%;
+    height: 200%;
+    transform: rotate(45deg);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.stripe-1 {
+    background: linear-gradient(135deg, #ff6b6b, #ff4757);
+    clip-path: polygon(0 0, 40% 0, 40% 100%, 0 100%);
+}
+
+.stripe-2 {
+    background: linear-gradient(135deg, #1dd1a1, #10ac84);
+    clip-path: polygon(42% 0, 58% 0, 58% 100%, 42% 100%);
+}
+
+.stripe-3 {
+    background: linear-gradient(135deg, #54a0ff, #2e86de);
+    clip-path: polygon(60% 0, 100% 0, 100% 100%, 60% 100%);
+}
+/* ---------- RESPONSIVE ---------- */
+@media (min-width: 600px) {
+    .actions {
+        align-items: center;
+    }
+
+    .action-group {
+        flex-direction: row;
+        justify-content: center;
+    }
+
+    .btn {
+        min-width: 160px;
+    }
+}
