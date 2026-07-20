@@ -19,6 +19,7 @@ async def test_send_normal_message(
 
     mock_execute.side_effect=[
         [{"color":"red"}],
+        1,
         1
     ]
 
@@ -83,6 +84,7 @@ async def test_mention_detection(
 
     mock_execute.side_effect=[
         [{"color":"red"}],
+        1,
         1
     ]
 
@@ -108,6 +110,7 @@ async def test_multiple_mentions(mock_execute, mock_broadcast):
 
     mock_execute.side_effect = [
         [{"color": "red"}],
+        1,
         1
     ]
 
@@ -133,6 +136,7 @@ async def test_send_message_without_player_color(
 
     mock_execute.side_effect=[
         [],
+        1,
         1
     ]
 
@@ -160,6 +164,7 @@ async def test_message_saved(mock_broadcast, mock_execute):
 
     mock_execute.side_effect = [
         [{"color": "red"}],
+        1,
         1
     ]
 
@@ -183,6 +188,7 @@ async def test_message_broadcast(mock_execute, mock_broadcast):
 
     mock_execute.side_effect = [
         [{"color": "red"}],
+        1,
         1
     ]
 

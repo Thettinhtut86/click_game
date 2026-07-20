@@ -658,35 +658,43 @@ async def test_winner_saved(
 
 
 @pytest.mark.asyncio
-@patch(
-    "backend.server.broadcast_to_room",
-    new_callable=AsyncMock
-)
-async def test_winner_broadcast(mock_broadcast):
-
-    server.rooms_state={
-        "room1":{
-            "players":[
+@patch("backend.server.broadcast_rooms", new_callable=AsyncMock)
+@patch("backend.server.broadcast_to_room", new_callable=AsyncMock)
+@patch("backend.server.execute")
+async def test_winner_broadcast(
+    mock_execute,
+    mock_broadcast_room,
+    mock_broadcast_rooms,
+):
+    server.rooms_state = {
+        "room1": {
+            "players": [
                 {
-                    "id":"1",
-                    "name":"Alice"
+                    "id": "1",
+                    "name": "Alice",
                 }
             ],
-            "bubbles":{
-                "B1":{
-                    "uid":"1"
+            "bubbles": {
+                "B1": {
+                    "uid": "1"
                 }
             }
         }
     }
 
+    await server.handle_game_end("room1")
 
-    await server.handle_game_end(
-        "room1"
+    mock_broadcast_room.assert_awaited_once()
+
+    mock_execute.assert_called_once_with(
+        "UPDATE rooms SET winner_id=%s, started=0 WHERE id=%s",
+        ("1", "room1"),
+        commit=True,
     )
 
+    mock_broadcast_rooms.assert_awaited_once()
 
-    mock_broadcast.assert_called_once()
+    assert "room1" not in server.rooms_state
 
 @pytest.mark.asyncio
 @patch("backend.server.broadcast_to_room",

@@ -272,11 +272,13 @@ async def test_leave_room_success(mock_ws):
         }
     }
 
-
     with patch(
         "backend.server.remove_player_from_room",
         new_callable=AsyncMock
-    ):
+    ) as mock_remove, patch(
+        "backend.server.broadcast_rooms",
+        new_callable=AsyncMock
+    ) as mock_broadcast:
 
         await server.handle_leave_room(
             mock_ws,
@@ -287,7 +289,9 @@ async def test_leave_room_success(mock_ws):
         )
 
 
-    mock_ws.send_text.assert_called()
+    mock_remove.assert_awaited_once_with("1", "1")
+    mock_ws.send_text.assert_called_once()
+    mock_broadcast.assert_awaited_once()
 
 
 
@@ -357,22 +361,31 @@ async def test_player_quit(mock_ws):
         }
     }
 
-
     with patch(
         "backend.server.remove_player_from_room",
         new_callable=AsyncMock
-    ):
+    ) as mock_remove, patch(
+        "backend.server.broadcast_rooms",
+        new_callable=AsyncMock
+    ) as mock_broadcast:
 
         await server.handle_quit_room(
             mock_ws,
             "2",
             {
-                "roomId":"1"
+                "roomId": "1"
             }
         )
 
+    mock_remove.assert_awaited_once_with("2", "1")
+    mock_broadcast.assert_awaited_once()
 
-    mock_ws.send_text.assert_called()
+    mock_ws.send_text.assert_awaited_once_with(
+        json.dumps({
+            "action": "quit_ack",
+            "roomId": "1"
+        })
+    )
 
 
 

@@ -198,12 +198,14 @@ async def test_broadcast_rooms(mock_rooms):
 
 
 @pytest.mark.asyncio
+@patch("backend.server.get_rooms_data")
 @patch("backend.server.broadcast_to_all")
-async def test_send_room_update(mock_broadcast):
+async def test_send_room_update(mock_broadcast, mock_rooms):
 
+    mock_rooms.return_value = []
     await server.broadcast_rooms()
 
-
+    mock_rooms.assert_called()
     mock_broadcast.assert_called()
 
 
@@ -318,20 +320,30 @@ async def test_online_one_user(mock_execute):
 
 
 @pytest.mark.asyncio
-async def test_online_multiple_users():
+@patch("backend.server.execute")
+async def test_online_multiple_users(mock_execute):
 
     server.clients={
         "user1":None,
         "user2":None
     }
 
-    await server.broadcast_online_users()
+    mock_execute.return_value = [
+        {"id": "user1", "name": "player1", "color": "red"},
+        {"id": "user2", "name": "player2", "color": "blue"}
+    ]
 
+    await server.broadcast_online_users()
+    mock_execute.assert_called()
 
 
 @pytest.mark.asyncio
-async def test_online_empty():
+@patch("backend.server.execute")
+async def test_online_empty(mock_execute):
 
     server.clients=[]
 
+    mock_execute.return_value = []
+
     await server.broadcast_online_users()
+    mock_execute.assert_called()

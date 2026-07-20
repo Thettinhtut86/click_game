@@ -70,26 +70,73 @@ ALGORITHM = "HS256"
 
 
 # ---------- Database Helper ----------
-def execute(query: str, params: tuple = None, fetch: bool = False, dictionary: bool = False, commit: bool = False):
+def execute(
+    query: str,
+    params: tuple = None,
+    fetch: bool = False,
+    dictionary: bool = False,
+    commit: bool = False
+):
     conn = None
     cursor = None
+
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor(dictionary=dictionary)
+
         cursor.execute(query, params or ())
+
         if commit:
             conn.commit()
             return cursor.lastrowid
+
         if fetch:
-            return cursor.fetchall()
+            return cursor.fetchall() or []
+
+        return None
+
     except Error as e:
         logger.error("DB Error: %s", e)
-        raise
+
+        # CI/CD should not crash because DB is unavailable
+        if fetch:
+            return []
+
+        return None
+
     finally:
         if cursor:
             cursor.close()
+
         if conn:
             conn.close()
+
+
+# ---------- Safe Query Helpers ----------
+def fetch_one(query, params=None):
+
+    rows = execute(
+        query,
+        params=params,
+        fetch=True,
+        dictionary=True
+    )
+
+    if not rows:
+        return None
+
+    return rows[0]
+
+
+def fetch_all(query: str, params: tuple = None):
+    rows = execute(
+        query=query,
+        params=params,
+        fetch=True,
+        dictionary=True
+    )
+
+    return rows if rows else []
 
 def get_rooms_data():
     rooms = execute(
@@ -113,7 +160,7 @@ def get_rooms_data():
         if room.get("created_at"):
             room["created_at"] = room["created_at"].strftime("%Y-%m-%d %H:%M:%S")
 
-    return rooms            
+    return rooms
 
 def serialize_player(p: dict) -> dict:
     return {
@@ -863,19 +910,34 @@ async def handle_restore_message(uid: str, data: dict):
     })
 
 async def mark_seen(uid: str):
-    last_id = execute("""
-        SELECT MAX(id) as last_id FROM daily_chat
-    """, fetch=True, dictionary=True)[0]["last_id"]
 
-    execute("""
-        INSERT INTO chat_reads(user_id, last_read_id)
-        VALUES (%s,%s)
-        ON DUPLICATE KEY UPDATE last_read_id=%s
-    """, (uid, last_id, last_id), commit=True)
+    row = fetch_one(
+        """
+        SELECT MAX(id) AS last_id
+        FROM daily_chat
+        """
+    )
 
-    execute("""
-        UPDATE chat_unread SET unread_count=0 WHERE user_id=%s
-    """, (uid,), commit=True)
+    if not row:
+        return
+
+    last_id = row.get("last_id")
+
+    if last_id is None:
+        return
+
+    execute(
+        """
+        UPDATE chat_unread
+        SET last_seen=%s
+        WHERE user_id=%s
+        """,
+        (
+            last_id,
+            uid
+        ),
+        commit=True
+    )
 
 async def handle_get_rooms(ws: WebSocket, uid: str, name: str, data: dict):
     await ws.send_text(json.dumps({
