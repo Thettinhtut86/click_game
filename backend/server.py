@@ -8,6 +8,7 @@ import mysql.connector
 from mysql.connector import Error
 from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, Body, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials
 from datetime import datetime, timedelta, time, timezone
 from typing import Dict, Optional
 from jose import JWTError, jwt
@@ -122,7 +123,10 @@ def serialize_player(p: dict) -> dict:
     }            
 
 # ---------- Utility Functions ----------
-def norm_id(x) -> str:
+def norm_id(x) -> str | None:
+    if x is None:
+        return None
+
     return str(x)
 
 def ensure_room(room: dict) -> dict:
@@ -203,21 +207,23 @@ def get_current_user(token: str):
         raise Exception("Invalid token")
     return payload
 
-def get_token_from_header(authorization: str = Header(None)):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing token")
+def get_token_from_header(
+    credentials: HTTPAuthorizationCredentials
+):
+    
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header missing"
+        )
+    
+    if credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication scheme"
+        )
 
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid auth header")
-
-    token = authorization.split(" ")[1]
-
-    payload = verify_token(token)
-
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    return payload
+    return credentials.credentials
 
 # ---------- Broadcast Functions ----------
 async def broadcast_to_all(message: dict):
@@ -526,51 +532,72 @@ async def handle_leave_room(ws: WebSocket, uid: str, data: dict):
     await broadcast_rooms()
 
 async def handle_start_game(ws: WebSocket, uid: str, data: dict):
-    """Handle starting a game."""
+
     room_id = str(data.get("roomId"))
-    
+
     if not room_id:
-        await ws.send_text(json.dumps({"action": "error", "message": "roomId required"}))
+        await ws.send_text(json.dumps({
+            "action":"error",
+            "message":"roomId required"
+        }))
         return
-    
+
     room = rooms_state.get(room_id)
+
     if not room:
-        await ws.send_text(json.dumps({"action": "error", "message": "Room not found"}))
+        await ws.send_text(json.dumps({
+            "action":"error",
+            "message":"Room not found"
+        }))
         return
-    
-    # Only host can start game
+
     if str(uid) != str(room.get("host")):
-        await ws.send_text(json.dumps({"action": "error", "message": "Only host can start the game"}))
+        await ws.send_text(json.dumps({
+            "action":"error",
+            "message":"Only host can start the game"
+        }))
         return
-    
-    # Generate bubble order
+
     displayOrder = generate_bubble_order()
 
     if room.get("option") == "desc":
-        play_order = list(range(100, 0, -1))
+        play_order = list(range(100,0,-1))
     else:
-        play_order = list(range(1, 101))
+        play_order = list(range(1,101))
+
     room["play_order"] = play_order
     room["display_order"] = displayOrder
     room["index"] = 0
     room["game_started"] = True
-    room["bubbles"] = {f"B{i}": None for i in displayOrder}
+    room["bubbles"] = {
+        f"B{i}":None 
+        for i in displayOrder
+    }
 
-    # Update database
     try:
-        execute("UPDATE rooms SET started=1 WHERE id=%s", (room_id,), commit=True)
+        execute(
+            "UPDATE rooms SET started=1 WHERE id=%s",
+            (room_id,),
+            commit=True
+        )
+
     except Exception:
-        logger.exception("Failed to update room started status")
-    
-    await broadcast_to_room(room_id, {
-        "action": "game_started",
-        "roomId": room_id,
-        "bubbles": room["bubbles"],
-        "players": room["players"],
-        "play_order": room["play_order"],
-        "display_order": room["display_order"],
-        "option": room["option"]
-    })
+        logger.exception(
+            "Failed to update room started status"
+        )
+
+    await broadcast_to_room(
+        room_id,
+        {
+            "action":"game_started",
+            "roomId":room_id,
+            "bubbles":room["bubbles"],
+            "players":room["players"],
+            "play_order":room["play_order"],
+            "display_order":room["display_order"],
+            "option":room["option"]
+        }
+    )
 
 async def handle_quit_room(ws: WebSocket, uid: str, data: dict):
     """Handle player quitting a room."""
@@ -873,31 +900,32 @@ async def handle_ws_action(ws: WebSocket, player_id: str, player_name: str, data
 
 
 # ---------- Scheduled Tasks ----------
+async def run_daily_cleanup():
+    execute("DELETE FROM players WHERE created_at < CURDATE()", commit=True)
+    execute("DELETE FROM daily_chat WHERE created_at < CURDATE()", commit=True)
+    execute("DELETE FROM chat_reads", commit=True)
+    execute("DELETE FROM chat_unread", commit=True)
+
+    rooms_state.clear()
+
+    await broadcast_to_all({
+        "action": "chat_reset"
+    })
+
+
 async def daily_player_cleanup():
-    """Clear player records daily at midnight."""
     while True:
         now = datetime.now()
-        next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        wait_time = (next_run - now).total_seconds()
-        await asyncio.sleep(wait_time)
-        
-        logger.info("Daily cleanup: Clearing all players and daily chats from DB...")
+        next_run = (
+            now + timedelta(days=1)
+        ).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        await asyncio.sleep((next_run - now).total_seconds())
+
         try:
-            execute("DELETE FROM players WHERE created_at < CURDATE()", commit=True)
-
-            execute("DELETE FROM daily_chat WHERE created_at < CURDATE()", commit=True)
-
-            execute("DELETE FROM chat_reads", commit=True)
-
-            execute("DELETE FROM chat_unread", commit=True)
-
-            rooms_state.clear()
-            await broadcast_to_all({
-                "action": "chat_reset"
-            })
-
-        except Exception as e:
-            logger.exception("Daily cleanup failed: %s", e)
+            await run_daily_cleanup()
+        except Exception:
+            logger.exception(...)
 
 # ---------- Startup ----------
 @app.on_event("startup")
@@ -933,52 +961,127 @@ def startup():
 # ---------- REST Endpoints ----------
 @app.post("/login")
 def login(payload: dict = Body(...)):
+
     name = payload.get("user_name") or payload.get("name")
+
     if not name:
-        return {"status": "error", "message": "user_name required"}
-    
+        raise HTTPException(
+            status_code=400,
+            detail="user_name required"
+        )
+
     try:
-        players = execute("SELECT id, name, color FROM players", fetch=True, dictionary=True) or []
+        players = execute(
+            "SELECT id, name, color FROM players",
+            fetch=True,
+            dictionary=True
+        ) or []
+
+
         if len(players) >= 12:
-            return {"status": "error", "message": "Maximum 12 players allowed"}
-        
-        used_colors = {p["color"] for p in players if p.get("color")}
-        available_colors = [c for c in PLAYER_COLORS if c not in used_colors]
+            raise HTTPException(
+                status_code=400,
+                detail="Maximum 12 players allowed"
+            )
+
+
+        used_colors = {
+            p["color"]
+            for p in players
+            if p.get("color")
+        }
+
+
+        available_colors = [
+            c for c in PLAYER_COLORS
+            if c not in used_colors
+        ]
+
+
         if not available_colors:
-            return {"status": "error", "message": "No colors available"}
-        
+            raise HTTPException(
+                status_code=400,
+                detail="No colors available"
+            )
+
+
         color = available_colors[0]
-        user_id = execute("INSERT INTO players (name, joined_at, color) VALUES (%s, NOW(), %s)", (name, color), commit=True)
-        token = create_access_token({"user_id": str(user_id), "userName":name, "color": color})
-        
-        return {"status": "ok", "user_id": str(user_id), "userName": name, "color": color,"token": token}
+
+
+        user_id = execute(
+            """
+            INSERT INTO players
+            (name, joined_at, color)
+            VALUES (%s, NOW(), %s)
+            """,
+            (name, color),
+            commit=True,
+        )
+
+
+        token = create_access_token(
+            {
+                "user_id": str(user_id),
+                "userName": name,
+                "color": color
+            }
+        )
+
+
+        return {
+            "status": "ok",
+            "user_id": str(user_id),
+            "userName": name,
+            "color": color,
+            "token": token,
+        }
+
+
+    except HTTPException:
+        raise
+
+
     except Exception as e:
-        logger.exception("Login failed: %s", e)
-        return {"status": "error", "message": "db error"}
+        logger.exception(
+            "Login failed: %s",
+            e
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="db error"
+        )
 
 @app.post("/logout")
 def logout(background_tasks: BackgroundTasks, payload: dict = Body(...)):
     uid = payload.get("user_id") or payload.get("player_id")
     if not uid or uid == "undefined":
         logger.error("Invalid logout uid received: %s", uid)
-        return {"status": "error", "message": "user_id required"}
+        raise HTTPException(status_code=400, detail="user_id required")
+
     try:
         execute("DELETE FROM players WHERE id=%s", (uid,), commit=True)
-        
+
         if uid in connected_clients:
             connected_clients.pop(uid, None)
-        
+
         # Remove from all rooms
         for rid in list(rooms_state.keys()):
             room = rooms_state[rid]
             room["players"] = [p for p in room["players"] if p["id"] != uid]
             room["watchers"] = [w for w in room.get("watchers", []) if str(w["id"]) != str(uid)]
-        
+
         background_tasks.add_task(broadcast_rooms)
         return {"status": "logged_out", "userId": uid}
+    except HTTPException:
+        raise
+
     except Exception as e:
         logger.exception("Logout failed: %s", e)
-        return {"status": "error", "message": "db error"}
+        raise HTTPException(
+            status_code=500,
+            detail="db error"
+        )
 
 @app.get("/rooms")
 def list_rooms():
@@ -991,7 +1094,7 @@ def list_rooms():
         ) or []
     except Exception as e:
         logger.exception("Failed to list rooms: %s", e)
-        return []
+        raise HTTPException(status_code=500, detail="db error")
 
 # ---------- WebSocket Endpoint ----------
 @app.websocket("/ws")
