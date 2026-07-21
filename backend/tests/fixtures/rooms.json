@@ -1,21 +1,22 @@
 [
-    {
-        "roomId":"room1",
-        "host":"1",
-        "option":"asc",
-        "players":[
-            "1",
-            "2"
-        ],
-        "started":false
-    },
-    {
-        "roomId":"room2",
-        "host":"2",
-        "option":"desc",
-        "players":[
-            "2"
-        ],
-        "started":true
-    }
+ {
+   "roomId":"room1",
+   "host":"1",
+   "option":"asc",
+
+   "players":[
+     {
+       "id":"1",
+       "name":"player1",
+       "color":"red"
+     },
+     {
+       "id":"2",
+       "name":"player2",
+       "color":"blue"
+     }
+   ],
+
+   "started":false
+ }
 ]

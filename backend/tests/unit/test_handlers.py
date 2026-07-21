@@ -22,7 +22,15 @@ def mock_ws():
 # =====================================================
 
 @pytest.mark.asyncio
-async def test_handle_handshake(mock_ws):
+@patch("backend.server.broadcast_online_users", new_callable=AsyncMock)
+@patch("backend.server.mark_seen", new_callable=AsyncMock)
+@patch("backend.server.broadcast_rooms", new_callable=AsyncMock)
+async def test_handle_handshake(
+        mock_broadcast_rooms,
+        mock_mark_seen,
+        mock_broadcast_online,
+        mock_ws
+):
 
     await server.handle_handshake(
         mock_ws,
@@ -40,6 +48,13 @@ async def test_handle_handshake(mock_ws):
     assert message["userId"] == "1"
 
 
+    mock_broadcast_online.assert_called_once()
+
+    mock_mark_seen.assert_called_once_with(
+        "1"
+    )
+
+    mock_broadcast_rooms.assert_called_once()
 
 # =====================================================
 # create room
@@ -272,11 +287,13 @@ async def test_leave_room_success(mock_ws):
         }
     }
 
-
     with patch(
         "backend.server.remove_player_from_room",
         new_callable=AsyncMock
-    ):
+    ) as mock_remove, patch(
+        "backend.server.broadcast_rooms",
+        new_callable=AsyncMock
+    ) as mock_broadcast:
 
         await server.handle_leave_room(
             mock_ws,
@@ -287,31 +304,32 @@ async def test_leave_room_success(mock_ws):
         )
 
 
-    mock_ws.send_text.assert_called()
+    mock_remove.assert_awaited_once_with("1", "1")
+    mock_ws.send_text.assert_called_once()
+    mock_broadcast.assert_awaited_once()
 
 
 
 @pytest.mark.asyncio
-async def test_leave_running_game(mock_ws):
+async def test_leave_running_game_rejected(mock_ws):
 
-    server.rooms_state={
-        "1":{
-            "game_started":True
+    server.rooms_state = {
+        "1": {
+            "game_started": True
         }
     }
-
 
     await server.handle_leave_room(
         mock_ws,
         "1",
         {
-            "roomId":"1"
+            "roomId": "1"
         }
     )
 
-
-    mock_ws.send_text.assert_not_called()
-
+    mock_ws.send_text.assert_called_once()
+    message = mock_ws.send_text.call_args.args[0]
+    assert "Cannot leave room while game is active" in message
 
 
 # =====================================================
@@ -357,22 +375,31 @@ async def test_player_quit(mock_ws):
         }
     }
 
-
     with patch(
         "backend.server.remove_player_from_room",
         new_callable=AsyncMock
-    ):
+    ) as mock_remove, patch(
+        "backend.server.broadcast_rooms",
+        new_callable=AsyncMock
+    ) as mock_broadcast:
 
         await server.handle_quit_room(
             mock_ws,
             "2",
             {
-                "roomId":"1"
+                "roomId": "1"
             }
         )
 
+    mock_remove.assert_awaited_once_with("2", "1")
+    mock_broadcast.assert_awaited_once()
 
-    mock_ws.send_text.assert_called()
+    mock_ws.send_text.assert_awaited_once_with(
+        json.dumps({
+            "action": "quit_ack",
+            "roomId": "1"
+        })
+    )
 
 
 

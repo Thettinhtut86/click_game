@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, AsyncMock
 from datetime import datetime, timedelta
 from jose import jwt
 from fastapi.testclient import TestClient
-from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 
 from backend import server
@@ -18,7 +17,7 @@ FIXTURE_PATH = pathlib.Path(
 def users_fixture():
 
     with open(
-        FIXTURE_PATH / "users.json"
+        FIXTURE_PATH / "user.json"
     ) as f:
 
         return json.load(f)
@@ -73,12 +72,6 @@ def expired_token(mock_payload):
         expires_delta=expire
     )
 
-
-@pytest.fixture
-def auth_header(valid_token):
-    return {
-        "Authorization": f"Bearer {valid_token}"
-    }
 
 
 @pytest.fixture
@@ -179,3 +172,82 @@ def game_room():
         }
     }
 
+@pytest.fixture
+def mock_execute(monkeypatch):
+
+    def fake_execute(
+        query,
+        params=None,
+        fetch=False,
+        dictionary=False
+    ):
+
+        query = str(query).lower()
+
+
+        # player lookup
+        if "select color" in query:
+
+            return [
+                {
+                    "color":"red"
+                }
+            ]
+
+
+        # player existence
+        if "select * from players" in query:
+
+            return [
+                {
+                    "id":"1",
+                    "user_id":"1",
+                    "user_name":"testuser",
+                    "color":"red"
+                }
+            ]
+
+
+        # room queries
+        if "select" in query:
+
+            return []
+
+
+        # insert/update/delete
+        return None
+
+
+
+    monkeypatch.setattr(
+        server,
+        "execute",
+        fake_execute
+    )
+
+
+    return fake_execute
+
+@pytest.fixture
+def loaded_room_state(rooms_fixture):
+
+    state={}
+
+    for room in rooms_fixture:
+
+        state[
+            room["roomId"]
+        ] = {
+
+            "host":room["host"],
+
+            "players":room["players"],
+
+            "option":room["option"],
+
+            "game_started":
+                room["started"]
+        }
+
+
+    return state

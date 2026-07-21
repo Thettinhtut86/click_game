@@ -2,7 +2,6 @@ name: Click Game Backend CI
 
 
 on:
-
   push:
     branches:
       - main
@@ -16,204 +15,74 @@ on:
 
 jobs:
 
-
   test:
 
-
-    runs-on:
-      ubuntu-latest
-
-
-
-    services:
-
-
-      mysql:
-
-        image:
-          mysql:8.0
-
-
-        env:
-
-          MYSQL_ROOT_PASSWORD:
-            root
-
-          MYSQL_DATABASE:
-            click_game_test
-
-
-        ports:
-
-          - 3306:3306
-
-
-        options:
-          >-
-          --health-cmd="mysqladmin ping -h localhost"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
+    runs-on: ubuntu-latest
 
 
     steps:
 
+      # ------------------------
+      # Checkout
+      # ------------------------
 
-    # ------------------------
-    # Checkout
-    # ------------------------
-
-    - name:
-        Checkout repository
-
-      uses:
-        actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
 
 
-    # ------------------------
-    # Python
-    # ------------------------
+      # ------------------------
+      # Python
+      # ------------------------
 
-    - name:
-        Setup Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
 
-      uses:
-        actions/setup-python@v5
-
-      with:
-
-        python-version:
-          "3.11"
+        with:
+          python-version: "3.13"
 
 
 
-    # ------------------------
-    # Install
-    # ------------------------
+      # ------------------------
+      # Install dependencies
+      # ------------------------
 
-    - name:
-        Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
 
-      run:
+          pip install -r requirements.txt
 
-        python -m pip install --upgrade pip
-
-        pip install -r requirements.txt
-
-        pip install -r requirements-test.txt
+          pip install -r requirements-test.txt
 
 
 
-    # ------------------------
-    # Prepare database
-    # ------------------------
+      # ------------------------
+      # Run tests + coverage
+      # ------------------------
 
-    - name:
-        Create test schema
-
-      run:
-
-        mysql \
-        -h 127.0.0.1 \
-        -uroot \
-        -proot \
-        click_game_test \
-        < tests/fixtures/schema.sql
+      - name: Run tests
+        run: |
+          pytest \
+            tests \
+            --cov=backend \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-fail-under=90
 
 
 
-    - name:
-        Insert seed data
+      # ------------------------
+      # Upload coverage
+      # ------------------------
 
-      run:
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
 
-        mysql \
-        -h 127.0.0.1 \
-        -uroot \
-        -proot \
-        click_game_test \
-        < tests/fixtures/seed.sql
+        with:
+          name: coverage-report
 
-
-
-    # ------------------------
-    # Unit Tests
-    # ------------------------
-
-    - name:
-        Run unit tests
-
-      run:
-
-        pytest tests/unit
-
-
-
-    # ------------------------
-    # Integration Tests
-    # ------------------------
-
-    - name:
-        Run integration tests
-
-      env:
-
-        DB_HOST:
-          127.0.0.1
-
-        DB_PORT:
-          3306
-
-        DB_NAME:
-          click_game_test
-
-        DB_USER:
-          root
-
-        DB_PASSWORD:
-          root
-
-
-      run:
-
-        pytest tests/integration
-
-
-
-    # ------------------------
-    # Coverage
-    # ------------------------
-
-    - name:
-        Coverage report
-
-      run:
-
-        pytest \
-        --cov=server \
-        --cov-report=xml \
-        --cov-report=html
-
-
-
-    # ------------------------
-    # Upload coverage
-    # ------------------------
-
-    - name:
-        Upload coverage
-
-      uses:
-        actions/upload-artifact@v4
-
-      with:
-
-        name:
-          coverage-report
-
-        path:
-
-          coverage_html/
-          coverage.xml
+          path: |
+            htmlcov/
+            coverage.xml

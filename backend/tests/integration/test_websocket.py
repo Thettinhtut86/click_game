@@ -1,11 +1,11 @@
 import pytest
-import json
 
 from unittest.mock import patch, AsyncMock
+from starlette.websockets import WebSocketDisconnect
 
 
 # =====================================================
-# websocket_endpoint()
+# websocket endpoint authentication
 # =====================================================
 
 
@@ -13,13 +13,15 @@ def test_websocket_missing_token(
         client
 ):
 
-    with client.websocket_connect(
-        "/ws"
-    ) as websocket:
+    with pytest.raises(WebSocketDisconnect) as exc:
 
-        data = websocket.receive_json()
+        with client.websocket_connect(
+            "/ws"
+        ):
+            pass
 
-        assert data is not None
+
+    assert exc.value.code == 1008
 
 
 
@@ -27,19 +29,22 @@ def test_websocket_invalid_token(
         client
 ):
 
-    with client.websocket_connect(
-        "/ws?token=invalid"
-    ) as websocket:
+    with pytest.raises(WebSocketDisconnect) as exc:
 
-        data = websocket.receive_json()
+        with client.websocket_connect(
+            "/ws?token=invalid"
+        ):
+            pass
 
-        assert data is not None
+
+    assert exc.value.code == 1008
 
 
 
 def test_websocket_valid_token(
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
@@ -65,10 +70,10 @@ def test_websocket_valid_token(
 # handshake
 # =====================================================
 
-
 def test_websocket_handshake(
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
@@ -86,24 +91,22 @@ def test_websocket_handshake(
         response = websocket.receive_json()
 
 
-        assert (
-            response["type"]
-            in [
-                "handshake",
-                "success"
-            ]
-        )
+        assert response["action"] in [
+            "handshake_ack",
+            "success"
+        ]
 
 
 
 # =====================================================
-# Invalid JSON
+# invalid JSON
 # =====================================================
 
 
 def test_websocket_invalid_json(
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
@@ -124,13 +127,14 @@ def test_websocket_invalid_json(
 
 
 # =====================================================
-# Unknown action
+# unknown action
 # =====================================================
 
 
 def test_websocket_unknown_action(
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
@@ -154,46 +158,19 @@ def test_websocket_unknown_action(
 
 
 # =====================================================
-# Disconnect
+# disconnect cleanup
 # =====================================================
 
 
 def test_websocket_disconnect_cleanup(
         client,
-        auth_token
-):
-
-    websocket = client.websocket_connect(
-        f"/ws?token={auth_token}"
-    )
-
-
-    websocket.__enter__()
-
-
-    websocket.close()
-
-
-    assert True
-
-
-
-# =====================================================
-# Host disconnect
-# =====================================================
-
-
-@patch("server.close_room")
-def test_host_disconnect(
-        mock_close,
-        client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
         f"/ws?token={auth_token}"
     ) as websocket:
-
 
         websocket.close()
 
@@ -203,21 +180,50 @@ def test_host_disconnect(
 
 
 # =====================================================
-# Broadcast online users
+# host disconnect
 # =====================================================
 
 
-@patch("server.broadcast_online_users")
+@patch(
+    "backend.server.close_room"
+)
+def test_host_disconnect(
+        mock_close_room,
+        client,
+        auth_token,
+        mock_execute
+):
+
+    with client.websocket_connect(
+        f"/ws?token={auth_token}"
+    ) as websocket:
+
+        websocket.close()
+
+
+    assert True
+
+
+
+# =====================================================
+# broadcast online users
+# =====================================================
+
+
+@patch(
+    "backend.server.broadcast_online_users",
+    new_callable=AsyncMock
+)
 def test_online_user_broadcast(
         mock_broadcast,
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
         f"/ws?token={auth_token}"
     ):
-
 
         pass
 
@@ -227,21 +233,24 @@ def test_online_user_broadcast(
 
 
 # =====================================================
-# Broadcast rooms
+# broadcast rooms
 # =====================================================
 
 
-@patch("server.broadcast_rooms")
+@patch(
+    "backend.server.broadcast_rooms",
+    new_callable=AsyncMock
+)
 def test_room_broadcast(
         mock_broadcast,
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
         f"/ws?token={auth_token}"
     ):
-
 
         pass
 
@@ -251,37 +260,40 @@ def test_room_broadcast(
 
 
 # =====================================================
-# Multiple users
+# multiple websocket clients
 # =====================================================
 
 
 def test_multiple_websocket_connections(
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
-    ws1 = client.websocket_connect(
+    with client.websocket_connect(
         f"/ws?token={auth_token}"
-    )
-
-    ws2 = client.websocket_connect(
-        f"/ws?token={auth_token}"
-    )
+    ) as ws1:
 
 
-    assert ws1
-    assert ws2
+        with client.websocket_connect(
+            f"/ws?token={auth_token}"
+        ) as ws2:
+
+
+            assert ws1 is not None
+            assert ws2 is not None
 
 
 
 # =====================================================
-# websocket action flow
+# create room action
 # =====================================================
 
 
 def test_websocket_create_room_action(
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
@@ -293,6 +305,7 @@ def test_websocket_create_room_action(
             {
                 "action":
                 "create_room",
+
                 "roomName":
                 "test"
             }
@@ -302,18 +315,18 @@ def test_websocket_create_room_action(
         response = websocket.receive_json()
 
 
-        assert response
+        assert response is not None
 
 
 
 # =====================================================
-# websocket leave action
+# leave room action
 # =====================================================
-
 
 def test_websocket_leave_room_action(
         client,
-        auth_token
+        auth_token,
+        mock_execute
 ):
 
     with client.websocket_connect(
@@ -332,4 +345,4 @@ def test_websocket_leave_room_action(
         response = websocket.receive_json()
 
 
-        assert response
+        assert response is not None

@@ -1,8 +1,93 @@
 from unittest.mock import patch
 
 
+def test_rooms_empty(
+        client,
+        mock_execute
+):
 
-def test_rooms_empty(client):
+    response = client.get(
+        "/rooms"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == []
+
+
+def test_rooms_one_room(
+        client,
+        monkeypatch
+):
+
+    def fake_execute(
+            query,
+            params=None,
+            fetch=False,
+            dictionary=False
+    ):
+
+        return [
+            {
+                "id": "room1",
+                "host_id": "1",
+                "player_count": 2
+            }
+        ]
+
+
+    monkeypatch.setattr(
+        "backend.server.execute",
+        fake_execute
+    )
+
+
+    response = client.get(
+        "/rooms"
+    )
+
+
+    assert response.status_code == 200
+
+    rooms = response.json()
+
+    assert len(rooms) == 1
+
+    assert rooms[0]["id"] == "room1"
+
+
+
+def test_rooms_multiple_rooms(
+        client,
+        monkeypatch
+):
+
+    def fake_execute(
+            query,
+            params=None,
+            fetch=False,
+            dictionary=False
+    ):
+
+        return [
+            {
+                "id":"room1",
+                "host_id":"1",
+                "player_count":2
+            },
+            {
+                "id":"room2",
+                "host_id":"2",
+                "player_count":4
+            }
+        ]
+
+
+    monkeypatch.setattr(
+        "backend.server.execute",
+        fake_execute
+    )
+
 
     response = client.get(
         "/rooms"
@@ -12,29 +97,10 @@ def test_rooms_empty(client):
     assert response.status_code == 200
 
 
-
-def test_rooms_one_room(client):
-
-    response = client.get(
-        "/rooms"
-    )
+    rooms = response.json()
 
 
-    assert isinstance(
-        response.json(),
-        list
-    )
-
-
-
-def test_rooms_multiple_rooms(client):
-
-    response = client.get(
-        "/rooms"
-    )
-
-
-    assert response.status_code == 200
+    assert len(rooms) == 2
 
 
 
@@ -54,4 +120,6 @@ def test_rooms_database_exception(
     )
 
 
-    assert response.status_code >=400
+    assert response.status_code == 500
+
+    assert response.json()["detail"] == "db error"

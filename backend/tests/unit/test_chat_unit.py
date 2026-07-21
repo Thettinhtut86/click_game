@@ -19,6 +19,7 @@ async def test_send_normal_message(
 
     mock_execute.side_effect=[
         [{"color":"red"}],
+        1,
         1
     ]
 
@@ -83,6 +84,7 @@ async def test_mention_detection(
 
     mock_execute.side_effect=[
         [{"color":"red"}],
+        1,
         1
     ]
 
@@ -108,6 +110,7 @@ async def test_multiple_mentions(mock_execute, mock_broadcast):
 
     mock_execute.side_effect = [
         [{"color": "red"}],
+        1,
         1
     ]
 
@@ -133,6 +136,7 @@ async def test_send_message_without_player_color(
 
     mock_execute.side_effect=[
         [],
+        1,
         1
     ]
 
@@ -160,6 +164,7 @@ async def test_message_saved(mock_broadcast, mock_execute):
 
     mock_execute.side_effect = [
         [{"color": "red"}],
+        1,
         1
     ]
 
@@ -183,6 +188,7 @@ async def test_message_broadcast(mock_execute, mock_broadcast):
 
     mock_execute.side_effect = [
         [{"color": "red"}],
+        1,
         1
     ]
 
@@ -401,28 +407,45 @@ async def test_restore_not_owner(mock_execute):
 # mark_seen()
 # =====================================================
 
-
 @pytest.mark.asyncio
 @patch("backend.server.execute")
-async def test_mark_seen_last_message(mock_execute):
+@patch("backend.server.fetch_one")
+async def test_mark_seen_last_message(
+        mock_fetch_one,
+        mock_execute
+):
 
-    mock_execute.side_effect = [
-        [
-            {
-                "last_id": 10
-            }
-        ],
-        1,
-        1
-    ]
+    mock_fetch_one.return_value = {
+        "last_id":10
+    }
+
+
+    mock_execute.return_value = 1
+
 
     result = await server.mark_seen(
         "1001"
     )
 
-    assert result is None
-    assert mock_execute.call_count == 3
 
+    assert result is None
+
+
+    mock_fetch_one.assert_called_once()
+
+
+    mock_execute.assert_called_once_with(
+        """
+        UPDATE chat_unread
+        SET last_seen=%s
+        WHERE user_id=%s
+        """,
+        (
+            10,
+            "1001"
+        ),
+        commit=True
+    )
 
 
 @pytest.mark.asyncio

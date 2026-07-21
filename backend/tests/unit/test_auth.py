@@ -155,13 +155,13 @@ def test_AUTH011_get_current_user_invalid():
 
 
 def test_AUTH012_valid_authorization_header(
-        auth_header
+        auth_headers
 ):
 
     credentials = HTTPAuthorizationCredentials(
         scheme="Bearer",
         credentials=
-        auth_header["Authorization"].split()[1]
+        auth_headers["Authorization"].split()[1]
     )
 
     result = server.get_token_from_header(

@@ -320,26 +320,28 @@ async def test_close_room_host_disconnect(
     "backend.server.broadcast_rooms",
     new_callable=AsyncMock
 )
+@patch(
+    "backend.server.execute"
+)
 async def test_close_room_clear_state(
+    mock_execute,
     mock_broadcast
 ):
 
     server.rooms_state = {
-        "room1":{
-            "players":[],
-            "watchers":[]
+        "room1": {
+            "players": [],
+            "watchers": []
         }
     }
-
 
     await server.close_room(
         "room1"
     )
 
-
     assert "room1" not in server.rooms_state
-
-
+    assert mock_execute.call_count == 2
+    mock_broadcast.assert_awaited_once()
 
 @pytest.mark.asyncio
 async def test_close_room_missing_room():
@@ -359,37 +361,38 @@ async def test_close_room_missing_room():
     "backend.server.broadcast_rooms",
     new_callable=AsyncMock
 )
+@patch(
+    "backend.server.execute"
+)
 async def test_close_room_notify_player(
+    mock_execute,
     mock_broadcast
 ):
 
     ws = AsyncMock()
-
-
-    server.connected_clients={
-        "1":ws
+    server.connected_clients = {
+        "1": ws
     }
 
-
-    server.rooms_state={
-        "room1":{
-            "players":[
+    server.rooms_state = {
+        "room1": {
+            "players": [
                 {
-                    "id":"1"
+                    "id": "1"
                 }
             ],
-            "watchers":[]
+            "watchers": []
         }
     }
-
 
     await server.close_room(
         "room1"
     )
 
-
     ws.send_text.assert_called_once()
-
     message = ws.send_text.call_args[0][0]
 
     assert "room_closed" in message
+    assert mock_execute.call_count == 2
+
+    mock_broadcast.assert_awaited_once()
