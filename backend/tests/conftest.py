@@ -72,31 +72,6 @@ def expired_token(mock_payload):
         expires_delta=expire
     )
 
-
-
-@pytest.fixture
-def mock_db():
-    db = MagicMock()
-    cursor = MagicMock()
-
-    db.cursor.return_value = cursor
-    db.commit = MagicMock()
-    db.close = MagicMock()
-
-    return db
-
-
-@pytest.fixture
-def async_socket():
-
-    socket = AsyncMock()
-
-    socket.send_json = AsyncMock()
-    socket.receive_json = AsyncMock()
-    socket.close = AsyncMock()
-
-    return socket
-
 @pytest.fixture
 def client():
 
