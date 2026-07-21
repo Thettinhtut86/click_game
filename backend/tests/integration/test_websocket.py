@@ -70,7 +70,6 @@ def test_websocket_valid_token(
 # handshake
 # =====================================================
 
-
 def test_websocket_handshake(
         client,
         auth_token,
@@ -92,8 +91,8 @@ def test_websocket_handshake(
         response = websocket.receive_json()
 
 
-        assert response["type"] in [
-            "handshake",
+        assert response["action"] in [
+            "handshake_ack",
             "success"
         ]
 
@@ -323,7 +322,6 @@ def test_websocket_create_room_action(
 # =====================================================
 # leave room action
 # =====================================================
-
 
 def test_websocket_leave_room_action(
         client,

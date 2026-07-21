@@ -463,6 +463,10 @@ async def handle_handshake(ws: WebSocket, uid: str, name: str):
         "userName": name
     }))
 
+    await broadcast_online_users()
+    await mark_seen(uid)
+    await broadcast_rooms()
+
 async def handle_create_room(ws: WebSocket, uid: str, name: str, data: dict):
     """Handle room creation via WebSocket."""
     try:
@@ -568,10 +572,12 @@ async def handle_leave_room(ws: WebSocket, uid: str, data: dict):
     room = rooms_state.get(room_id)
     
     if not room:
+        await ws.send_text(json.dumps({"action": "error", "message": "Room not found"}))
         return
     
     if room.get("game_started"):
         logger.info("Ignoring leave_room during active game")
+        await ws.send_text(json.dumps({"action": "error", "message": "Cannot leave room while game is active"}))
         return
     
     await remove_player_from_room(uid, room_id)
@@ -1181,10 +1187,7 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     connected_clients[player_id] = ws
     ws.scope["player_id"] = player_id
-    await broadcast_online_users()
-    await mark_seen(player_id)
-    await broadcast_rooms()
-    
+
     try:
         while True:
             raw = await ws.receive_text()
@@ -1192,6 +1195,7 @@ async def websocket_endpoint(ws: WebSocket):
                 msg = json.loads(raw)
             except Exception:
                 logger.error("Invalid WS message: %s", raw)
+                await ws.send_text(json.dumps({"error": "Invalid JSON format"}))
                 continue
 
             await handle_ws_action(ws, player_id, player_name, msg)

@@ -257,31 +257,28 @@ async def test_game_started_broadcast(
 "backend.server.broadcast_to_room",
 new_callable=AsyncMock
 )
+@patch(
+    "backend.server.get_player_color"
+)
 async def test_select_correct_bubble(
+        mock_color,
         mock_broadcast,
         websocket
 ):
 
+    mock_color.return_value = "red"
 
-    server.rooms_state={
-
-        "r1":{
-
-            "game_started":True,
-
-            "index":0,
-
-            "play_order":[1,2,3],
-
-            "players":[],
-
-            "bubbles":{
-                "B1":None
+    server.rooms_state = {
+        "r1": {
+            "game_started": True,
+            "index": 0,
+            "play_order": [1,2,3],
+            "players": [],
+            "bubbles": {
+                "B1": None
             }
         }
     }
-
-
 
     await server.handle_select_bubble(
         websocket,
@@ -293,17 +290,16 @@ async def test_select_correct_bubble(
         }
     )
 
-
-    room=server.rooms_state["r1"]
-
+    room = server.rooms_state["r1"]
 
     assert room["index"] == 1
-    assert room["bubbles"]["B1"] is not None
 
+    assert room["bubbles"]["B1"] == {
+        "uid":"1",
+        "color":"red"
+    }
 
     mock_broadcast.assert_awaited_once()
-
-
 
 @pytest.mark.asyncio
 async def test_select_wrong_bubble(
@@ -392,10 +388,17 @@ async def test_player_not_found(websocket):
     "backend.server.broadcast_to_room",
     new_callable=AsyncMock
 )
+@patch(
+    "backend.server.get_player_color"
+)
 async def test_select_broadcast(
+    mock_color,
     mock_broadcast,
     websocket
 ):
+
+    mock_color.return_value = "red"
+
 
     server.rooms_state = {
         "r1": {
@@ -419,10 +422,15 @@ async def test_select_broadcast(
     )
 
     mock_broadcast.assert_awaited_once()
-    
     message = mock_broadcast.call_args.args[1]
 
     assert message["action"] == "update_bubbles"
+    assert message["roomId"] == "r1"
+    assert message["currentIndex"] == 1
+    assert message["bubbles"]["B1"] == {
+        "uid":"1",
+        "color":"red"
+    }
 
 
 @pytest.mark.asyncio
