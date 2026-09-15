@@ -1,0 +1,12 @@
+[
+    {
+        "user_id": "1",
+        "userName": "player1",
+        "color": "red"
+    },
+    {
+        "user_id": "2",
+        "userName": "player2",
+        "color": "blue"
+    }
+]

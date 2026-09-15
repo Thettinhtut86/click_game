@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 
 from click_game.repositories.player_repository import PlayerRepository
 from click_game.repositories.room_repository import RoomRepository

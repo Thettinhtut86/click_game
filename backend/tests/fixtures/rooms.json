@@ -1,0 +1,22 @@
+[
+ {
+   "roomId":"room1",
+   "host":"1",
+   "option":"asc",
+
+   "players":[
+     {
+       "id":"1",
+       "name":"player1",
+       "color":"red"
+     },
+     {
+       "id":"2",
+       "name":"player2",
+       "color":"blue"
+     }
+   ],
+
+   "started":false
+ }
+]

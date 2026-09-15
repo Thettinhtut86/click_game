@@ -1,0 +1,61 @@
+CREATE TABLE IF NOT EXISTS players (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(100),
+    user_name VARCHAR(100),
+    color VARCHAR(50),
+    room_id VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS rooms (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    room_id VARCHAR(100),
+    room_name VARCHAR(100),
+    host_id VARCHAR(100),
+    option_type VARCHAR(20),
+    status VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS games (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    room_id VARCHAR(100),
+    winner_id VARCHAR(100),
+    score INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS chat (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    room_id VARCHAR(100),
+    user_id VARCHAR(100),
+    message TEXT,
+    deleted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS chat_reads (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    room_id VARCHAR(100),
+    user_id VARCHAR(100),
+    message_id INT
+);
+
+
+CREATE TABLE IF NOT EXISTS chat_unread (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    room_id VARCHAR(100),
+    user_id VARCHAR(100),
+    count INT DEFAULT 0
+);
+
+
+CREATE TABLE IF NOT EXISTS room_state (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    room_id VARCHAR(100),
+    state JSON
+);

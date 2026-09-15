@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
 
@@ -7,7 +7,7 @@ from click_game.core.config import settings
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     payload = data.copy()
-    expires = datetime.now(timezone.utc) + (
+    expires = datetime.now(UTC) + (
         expires_delta or timedelta(minutes=settings.jwt_expire_minutes)
     )
     payload["exp"] = expires
