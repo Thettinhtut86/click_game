@@ -1,0 +1,19 @@
+{
+    "ascending_game":
+    {
+        "option":"asc",
+        "bubbles":[1,2,3,4,5]
+    },
+
+    "descending_game":
+    {
+        "option":"desc",
+        "bubbles":[5,4,3,2,1]
+    },
+
+    "winner":
+    {
+        "user_id":"1",
+        "score":100
+    }
+}
