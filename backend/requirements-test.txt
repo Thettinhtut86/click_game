@@ -1,8 +1,0 @@
-pytest
-pytest-asyncio
-pytest-cov
-httpx
-coverage
-websockets
-mysql-connector-python
-python-jose[cryptography]
