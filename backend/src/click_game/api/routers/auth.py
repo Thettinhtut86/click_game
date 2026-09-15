@@ -7,9 +7,8 @@ from click_game.repositories.player_repository import PlayerRepository
 from click_game.schemas.auth import LoginRequest, LoginResponse, LogoutRequest
 from click_game.services.auth_service import AuthService
 from click_game.services.room_service import RoomService
-from click_game.state.connections import connection_manager
-from click_game.state.rooms import room_store
-from click_game.websocket.manager import WebSocketManager
+from click_game.state.connections import connection_store
+from click_game.websocket.manager import websocket_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["auth"])
@@ -53,8 +52,8 @@ def logout(background_tasks: BackgroundTasks, payload: LogoutRequest):
 
     try:
         room_service.logout(uid)
-        connection_manager.disconnect_by_id(uid)
-        background_tasks.add_task(room_store.broadcast_rooms)
+        connection_store.disconnect_by_id(uid)
+        background_tasks.add_task(websocket_manager.broadcast_rooms)
         return {"status": "logged_out", "userId": uid}
     except Exception as exc:
         logger.exception("Logout failed")
