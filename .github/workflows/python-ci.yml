@@ -12,51 +12,138 @@ on:
 
 jobs:
   test:
+    name: Python ${{ matrix.python-version }}
+
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.13"
+
+    # ---------------------------------------------------------------
+    # CI-only configuration
+    #
+    # These are NOT your production credentials.
+    # They are only used by GitHub Actions.
+    # ---------------------------------------------------------------
+    env:
+      DATABASE_HOST: 127.0.0.1
+      DATABASE_USER: root
+      DATABASE_PASSWORD: root
+      DATABASE_NAME: live_game_test
+
+      JWT_SECRET_KEY: ci-test-secret-key
+
+      CORS_ORIGINS: '["http://localhost:4200"]'
+
+    # ---------------------------------------------------------------
+    # MySQL test database
+    # ---------------------------------------------------------------
+    services:
+      mysql:
+        image: mysql:8.0
+
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: live_game_test
+
+        ports:
+          - 3306:3306
+
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
     steps:
-      # ---------------------------------------------------------------
-      # Checkout
-      # ---------------------------------------------------------------
+
+      # -------------------------------------------------------------
+      # 1. Checkout
+      # -------------------------------------------------------------
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------------------
-      # Python
-      # ---------------------------------------------------------------
+
+      # -------------------------------------------------------------
+      # 2. Setup Python
+      # -------------------------------------------------------------
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-          cache: "pip"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
           cache-dependency-path: backend/pyproject.toml
 
-      # ---------------------------------------------------------------
-      # Install backend
-      # ---------------------------------------------------------------
+
+      # -------------------------------------------------------------
+      # 3. Verify Python
+      # -------------------------------------------------------------
+
+      - name: Verify Python
+        run: |
+          python --version
+          python -m pip --version
+
+
+      # -------------------------------------------------------------
+      # 4. Install backend package
+      #
+      # pyproject.toml is now the source of truth.
+      # This installs:
+      #
+      #   runtime dependencies
+      #   development dependencies
+      #   click_game package
+      # -------------------------------------------------------------
 
       - name: Install backend
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          python -m pip install -e ".[dev]"
 
-      # ---------------------------------------------------------------
-      # Verify package/import
-      # ---------------------------------------------------------------
 
-      - name: Verify application import
+      # -------------------------------------------------------------
+      # 5. Verify installed package
+      # -------------------------------------------------------------
+
+      - name: Verify package
         working-directory: backend
         run: |
-          python -c "from click_game.main import app; print(app.title)"
+          python -c "import click_game; print('Package OK:', click_game.__file__)"
 
-      # ---------------------------------------------------------------
-      # Run tests
-      # ---------------------------------------------------------------
 
-      - name: Run tests
+      # -------------------------------------------------------------
+      # 6. Verify FastAPI application import
+      # -------------------------------------------------------------
+
+      - name: Verify FastAPI application
+        working-directory: backend
+        run: |
+          python -c "from click_game.main import app; print('APP OK:', app.title)"
+
+
+      # -------------------------------------------------------------
+      # 7. Run Ruff
+      # -------------------------------------------------------------
+
+      - name: Run Ruff
+        working-directory: backend
+        run: |
+          ruff check src tests
+
+
+      # -------------------------------------------------------------
+      # 8. Run tests
+      # -------------------------------------------------------------
+
+      - name: Run pytest
         working-directory: backend
         run: |
           pytest \
@@ -66,15 +153,16 @@ jobs:
             --cov-report=html \
             --cov-fail-under=90
 
-      # ---------------------------------------------------------------
-      # Upload coverage
-      # ---------------------------------------------------------------
+
+      # -------------------------------------------------------------
+      # 9. Upload coverage
+      # -------------------------------------------------------------
 
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
+          name: coverage-python-${{ matrix.python-version }}
           path: |
             backend/htmlcov/
             backend/coverage.xml
