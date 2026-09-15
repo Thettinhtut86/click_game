@@ -1,6 +1,5 @@
 name: Click Game Backend CI
 
-
 on:
   push:
     branches:
@@ -11,77 +10,71 @@ on:
     branches:
       - main
 
-
-
 jobs:
-
   test:
-
     runs-on: ubuntu-latest
 
-
     steps:
-
-      # ------------------------
+      # ---------------------------------------------------------------
       # Checkout
-      # ------------------------
+      # ---------------------------------------------------------------
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-
-      # ------------------------
+      # ---------------------------------------------------------------
       # Python
-      # ------------------------
+      # ---------------------------------------------------------------
 
       - name: Setup Python
         uses: actions/setup-python@v5
-
         with:
           python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
 
+      # ---------------------------------------------------------------
+      # Install backend
+      # ---------------------------------------------------------------
 
-
-      # ------------------------
-      # Install dependencies
-      # ------------------------
-
-      - name: Install dependencies
+      - name: Install backend
+        working-directory: backend
         run: |
           python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
-          pip install -r backend/requirements.txt
+      # ---------------------------------------------------------------
+      # Verify package/import
+      # ---------------------------------------------------------------
 
-          pip install -r backend/requirements-test.txt
+      - name: Verify application import
+        working-directory: backend
+        run: |
+          python -c "from click_game.main import app; print(app.title)"
 
-
-
-      # ------------------------
-      # Run tests + coverage
-      # ------------------------
+      # ---------------------------------------------------------------
+      # Run tests
+      # ---------------------------------------------------------------
 
       - name: Run tests
+        working-directory: backend
         run: |
           pytest \
-            backend/tests \
-            --cov=backend \
+            --cov=click_game \
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
             --cov-fail-under=90
 
-
-
-      # ------------------------
+      # ---------------------------------------------------------------
       # Upload coverage
-      # ------------------------
+      # ---------------------------------------------------------------
 
       - name: Upload coverage report
+        if: always()
         uses: actions/upload-artifact@v4
-
         with:
           name: coverage-report
           path: |
-            htmlcov/
-            coverage.xml
+            backend/htmlcov/
+            backend/coverage.xml
