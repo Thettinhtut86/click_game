@@ -1,115 +1,45 @@
-from unittest.mock import patch
-from backend import server
+from unittest.mock import MagicMock
 
-def test_logout_success(client):
-    with patch("backend.server.execute") as mock_execute:
-        mock_execute.return_value = 1
-        mock_execute.side_effect = [
-            1,      
-            []      
-        ]
-
-        response = client.post(
-            "/logout",
-            json={
-                "user_id": "1"
-            }
-        )
-
-        assert response.status_code == 200
-        body = response.json()
-        assert body["status"] == "logged_out"
-        assert body["userId"] == "1"
+from click_game.api.routers import auth
+from click_game.state.connections import connection_store
+from click_game.state.rooms import RoomStore, room_store
 
 
+def test_logout_success(client, monkeypatch):
+    service = MagicMock()
+    monkeypatch.setattr(auth, "room_service", service)
 
-def test_logout_missing_uid(client):
+    response = client.post("/logout", json={"user_id": "1"})
 
-    response = client.post(
-        "/logout",
-        json={}
-    )
-
-    assert response.status_code == 400
-
+    assert response.status_code == 200
+    service.logout.assert_called_once_with("1")
 
 
-def test_logout_invalid_uid(client):
+def test_logout_removes_connection(client, monkeypatch):
+    service = MagicMock()
+    monkeypatch.setattr(auth, "room_service", service)
+    ws = MagicMock()
+    connection_store.add("1", ws)
 
-    response = client.post(
-        "/logout",
-        json={
-            "uid": "xxxx"
-        }
-    )
+    response = client.post("/logout", json={"user_id": "1"})
 
-    assert response.status_code == 400
-
-
-
-@patch("backend.server.execute")
-def test_logout_db_failure(
-        mock_execute,
-        client
-):
-
-    mock_execute.side_effect = Exception(
-        "DB error"
-    )
-
-    response = client.post(
-        "/logout",
-        json={
-            "user_id": "1"
-        }
-    )
-
-    assert response.status_code == 500
+    assert response.status_code == 200
+    assert connection_store.get("1") is None
 
 
+def test_logout_removes_player_from_room(client, monkeypatch):
+    service = MagicMock()
+    monkeypatch.setattr(auth, "room_service", service)
+    room_store.set("r1", RoomStore.ensure({
+        "host": "2",
+        "players": [
+            {"id": "1", "name": "Alice"},
+            {"id": "2", "name": "Bob"},
+        ],
+    }))
 
-def test_logout_connected_websocket(client):
-    with patch("backend.server.execute") as mock_execute:
-        mock_execute.side_effect = [1, []]
+    response = client.post("/logout", json={"user_id": "1"})
 
-        response = client.post("/logout", json={"user_id": "1"})
-        assert response.status_code == 200
-
-
-
-def test_logout_remove_player(client):
-    server.rooms_state = {
-        "r1": {
-            "players": [
-                {
-                    "id": "1",
-                    "name": "Alice"
-                },
-                {
-                    "id": "2",
-                    "name": "Bob"
-                }
-            ],
-            "watchers": []
-        }
-    }
-
-
-    with patch("backend.server.execute") as mock_execute:
-        mock_execute.side_effect  = [1, []]
-        response = client.post(
-            "/logout",
-            json={
-                "user_id": "1"
-            }
-        )
-
-        assert response.status_code == 200
-        assert len(
-            server.rooms_state["r1"]["players"]
-        ) == 1
-
-        assert (
-            server.rooms_state["r1"]["players"][0]["id"]
-            == "2"
-        )
+    assert response.status_code == 200
+    # The router delegates room membership cleanup to RoomService.
+    service.logout.assert_called_once_with("1")

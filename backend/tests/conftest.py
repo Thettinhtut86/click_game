@@ -1,48 +1,34 @@
+from datetime import timedelta
+from pathlib import Path
+from unittest.mock import AsyncMock
+
 import pytest
-import json
-import pathlib
-from unittest.mock import MagicMock, AsyncMock
-from datetime import datetime, timedelta
-from jose import jwt
 from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
 
-from backend import server
+from click_game.core.security import create_access_token
+from click_game.main import app
+from click_game.state.connections import connection_store
+from click_game.state.rooms import room_store
 
-FIXTURE_PATH = pathlib.Path(
-    __file__
-).parent / "fixtures"
 
-@pytest.fixture
-def users_fixture():
-
-    with open(
-        FIXTURE_PATH / "user.json"
-    ) as f:
-
-        return json.load(f)
-
+@pytest.fixture(autouse=True)
+def clean_runtime_state():
+    connection_store.connections.clear()
+    room_store.clear()
+    yield
+    connection_store.connections.clear()
+    room_store.clear()
 
 
 @pytest.fixture
-def rooms_fixture():
-
-    with open(
-        FIXTURE_PATH / "rooms.json"
-    ) as f:
-
-        return json.load(f)
-
+def client():
+    return TestClient(app)
 
 
 @pytest.fixture
-def game_fixture():
-
-    with open(
-        FIXTURE_PATH / "game_data.json"
-    ) as f:
-
-        return json.load(f)
+def mock_ws():
+    websocket = AsyncMock()
+    return websocket
 
 
 @pytest.fixture
@@ -50,179 +36,28 @@ def mock_payload():
     return {
         "user_id": "1001",
         "userName": "player1",
-        "color": "red"
+        "color": "red",
     }
 
 
 @pytest.fixture
 def valid_token(mock_payload):
-    from backend import server
-
-    return server.create_access_token(mock_payload)
+    return create_access_token(mock_payload)
 
 
 @pytest.fixture
 def expired_token(mock_payload):
-    from backend import server
-
-    expire = timedelta(seconds=-1)
-
-    return server.create_access_token(
+    return create_access_token(
         mock_payload,
-        expires_delta=expire
-    )
-
-@pytest.fixture
-def client():
-
-    return TestClient(
-        server.app
+        expires_delta=timedelta(seconds=-1),
     )
 
 
 @pytest.fixture
-async def async_client():
-
-    transport = ASGITransport(
-        app=server.app
-    )
-
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test"
-    ) as client:
-
-        yield client
+def auth_headers(valid_token):
+    return {"Authorization": f"Bearer {valid_token}"}
 
 
 @pytest.fixture
-def auth_token():
-
-    payload = {
-        "user_id": "1",
-        "userName": "testuser",
-        "color": "red"
-    }
-
-    return server.create_access_token(
-        payload
-    )
-
-
-@pytest.fixture
-def auth_headers(auth_token):
-
-    return {
-        "Authorization":
-        f"Bearer {auth_token}"
-    }
-
-@pytest.fixture
-def websocket():
-    return AsyncMock()
-
-@pytest.fixture
-def game_room():
-
-    return {
-        "r1":{
-            "host":"1",
-
-            "players":[
-                {
-                    "id":"1",
-                    "name":"player1",
-                    "color":"red"
-                },
-                {
-                    "id":"2",
-                    "name":"player2",
-                    "color":"blue"
-                }
-            ],
-
-            "option":"asc",
-
-            "game_started":False
-        }
-    }
-
-@pytest.fixture
-def mock_execute(monkeypatch):
-
-    def fake_execute(
-        query,
-        params=None,
-        fetch=False,
-        dictionary=False
-    ):
-
-        query = str(query).lower()
-
-
-        # player lookup
-        if "select color" in query:
-
-            return [
-                {
-                    "color":"red"
-                }
-            ]
-
-
-        # player existence
-        if "select * from players" in query:
-
-            return [
-                {
-                    "id":"1",
-                    "user_id":"1",
-                    "user_name":"testuser",
-                    "color":"red"
-                }
-            ]
-
-
-        # room queries
-        if "select" in query:
-
-            return []
-
-
-        # insert/update/delete
-        return None
-
-
-
-    monkeypatch.setattr(
-        server,
-        "execute",
-        fake_execute
-    )
-
-
-    return fake_execute
-
-@pytest.fixture
-def loaded_room_state(rooms_fixture):
-
-    state={}
-
-    for room in rooms_fixture:
-
-        state[
-            room["roomId"]
-        ] = {
-
-            "host":room["host"],
-
-            "players":room["players"],
-
-            "option":room["option"],
-
-            "game_started":
-                room["started"]
-        }
-
-
-    return state
+def fixture_path():
+    return Path(__file__).parent / "fixtures"
