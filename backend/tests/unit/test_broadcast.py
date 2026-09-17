@@ -1,349 +1,155 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch
 
-from backend import server
+from click_game.repositories.player_repository import PlayerRepository
+from click_game.repositories.room_repository import RoomRepository
+from click_game.state.connections import connection_store
+from click_game.state.rooms import room_store
+from click_game.websocket.manager import WebSocketManager
 
 
-
-# =====================================================
-# broadcast_to_all()
-# =====================================================
+@pytest.fixture(autouse=True)
+def clean_state():
+    connection_store.connections.clear()
+    room_store.clear()
+    yield
+    connection_store.connections.clear()
+    room_store.clear()
 
 
 @pytest.mark.asyncio
 async def test_broadcast_one_client():
-
+    manager = WebSocketManager()
     ws = AsyncMock()
+    connection_store.add("1001", ws)
 
-    server.connected_clients = {
-        "1001": ws
-    }
-
-
-    await server.broadcast_to_all(
-        {
-            "type":"test"
-        }
-    )
-
+    await manager.broadcast({"type": "test"})
 
     ws.send_text.assert_called_once()
-
 
 
 @pytest.mark.asyncio
 async def test_broadcast_multiple_clients():
+    manager = WebSocketManager()
+    ws1, ws2 = AsyncMock(), AsyncMock()
+    connection_store.add("1001", ws1)
+    connection_store.add("1002", ws2)
 
-    ws1 = AsyncMock()
-    ws2 = AsyncMock()
+    await manager.broadcast({})
 
-    server.connected_clients = {
-        "1001": ws1,
-        "1002": ws2
-    }
-
-
-    await server.broadcast_to_all({})
-
-
-    assert ws1.send_text.called
-    assert ws2.send_text.called
-
+    ws1.send_text.assert_called_once()
+    ws2.send_text.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_broadcast_disconnected_socket():
-
+async def test_broadcast_disconnected_socket_is_removed():
+    manager = WebSocketManager()
     ws = AsyncMock()
+    ws.send_text.side_effect = RuntimeError("closed")
+    connection_store.add("1001", ws)
 
-    ws.send_text.side_effect = Exception()
+    await manager.broadcast({})
 
-
-    server.connected_clients = {
-        "1001": ws
-    }
-
-
-    await server.broadcast_to_all({})
-
-    assert True
-
+    assert connection_store.get("1001") is None
 
 
 @pytest.mark.asyncio
-async def test_broadcast_exception_ignored():
+async def test_broadcast_room_players_and_watchers():
+    manager = WebSocketManager()
+    player_ws = AsyncMock()
+    watcher_ws = AsyncMock()
+    other_ws = AsyncMock()
 
-    ws=AsyncMock()
+    connection_store.add("1", player_ws)
+    connection_store.add("2", watcher_ws)
+    connection_store.add("3", other_ws)
+    room_store.set("room1", {
+        "players": [{"id": "1"}],
+        "watchers": [{"id": "2"}],
+    })
 
-    ws.send_json.side_effect=Exception(
-        "error"
-    )
+    await manager.broadcast_room("room1", {"type": "room"})
 
-    server.clients=[ws]
-
-
-    await server.broadcast_to_all({})
-
-
-
-# =====================================================
-# broadcast_to_room()
-# =====================================================
+    player_ws.send_text.assert_called_once()
+    watcher_ws.send_text.assert_called_once()
+    other_ws.send_text.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_broadcast_players_only():
+async def test_broadcast_missing_room():
+    manager = WebSocketManager()
+    await manager.broadcast_room("missing", {})
+    assert connection_store.ids() == []
 
+
+@pytest.mark.asyncio
+async def test_broadcast_room_members_snapshot():
+    manager = WebSocketManager()
     ws = AsyncMock()
+    connection_store.add("1", ws)
 
-    server.connected_clients = {
-        "1": ws
-    }
-
-    server.rooms_state = {
-        "room1": {
-            "players": [
-                {
-                    "id": "1"
-                }
-            ],
-            "watchers": []
-        }
-    }
-
-
-    await server.broadcast_to_room(
-        "room1",
-        {}
+    await manager.broadcast_room_members(
+        {"players": [{"id": "1"}], "watchers": []},
+        {"action": "room_closed"},
     )
 
     ws.send_text.assert_called_once()
 
-@pytest.mark.asyncio
-async def test_broadcast_watchers():
-
-    ws = AsyncMock()
-
-    server.connected_clients = {
-        "1": ws
-    }
-
-    server.rooms_state = {
-        "room1": {
-            "players": [],
-            "watchers": [
-                {
-                    "id": "1"
-                }
-            ]
-        }
-    }
-
-    await server.broadcast_to_room(
-        "room1",
-        {}
-    )
-
-    ws.send_text.assert_called_once()
 
 @pytest.mark.asyncio
-async def test_missing_room():
-
-    await server.broadcast_to_room(
-        "unknown",
-        {}
-    )
+@patch("click_game.websocket.manager.RoomRepository")
+async def test_broadcast_rooms(mock_repo):
+    manager = WebSocketManager()
+    mock_repo.return_value.list_rooms.return_value = []
+    with patch.object(manager, "broadcast", new_callable=AsyncMock) as broadcast:
+        await manager.broadcast_rooms()
+    broadcast.assert_awaited_once_with({"action": "rooms_update", "rooms": []})
 
 
 @pytest.mark.asyncio
-async def test_missing_websocket():
+async def test_broadcast_room_update():
+    manager = WebSocketManager()
+    room_store.set("room1", {
+        "host": "1",
+        "players": [{"id": "1", "name": "Alice", "color": "red"}],
+        "watchers": [{"id": "2", "name": "Bob"}],
+    })
+    with patch.object(manager, "broadcast", new_callable=AsyncMock) as broadcast:
+        await manager.broadcast_room_update("room1")
 
-    server.rooms_state = {
-        "room1": {
-            "players": [
-                {
-                    "id": "1"
-                }
-            ],
-            "watchers": []
-        }
-    }
-
-    server.connected_clients = {}
-
-    await server.broadcast_to_room(
-    "room1",
-    {}
-)
-
-
-
-# =====================================================
-# broadcast_rooms()
-# =====================================================
+    message = broadcast.await_args.args[0]
+    assert message["action"] == "room_update"
+    assert message["roomId"] == "room1"
+    assert message["hostId"] == "1"
 
 
 @pytest.mark.asyncio
-@patch("backend.server.get_rooms_data")
-async def test_broadcast_rooms(mock_rooms):
+@patch("click_game.websocket.manager.PlayerRepository")
+async def test_broadcast_online_users(mock_repo):
+    manager = WebSocketManager()
+    mock_repo.return_value.get_online.return_value = [{"id": "1"}]
+    connection_store.add("1", AsyncMock())
 
-    mock_rooms.return_value=[]
+    with patch.object(manager, "broadcast", new_callable=AsyncMock) as broadcast:
+        await manager.broadcast_online_users()
 
-
-    await server.broadcast_rooms()
-
-
-    mock_rooms.assert_called()
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.get_rooms_data")
-@patch("backend.server.broadcast_to_all")
-async def test_send_room_update(mock_broadcast, mock_rooms):
-
-    mock_rooms.return_value = []
-    await server.broadcast_rooms()
-
-    mock_rooms.assert_called()
-    mock_broadcast.assert_called()
-
-
-
-# =====================================================
-# broadcast_room_update()
-# =====================================================
+    mock_repo.return_value.get_online.assert_called_once_with(["1"])
+    broadcast.assert_awaited_once_with({
+        "action": "online_users",
+        "users": [{"id": "1"}],
+    })
 
 
 @pytest.mark.asyncio
-async def test_valid_room_update():
+async def test_close_all():
+    manager = WebSocketManager()
+    ws1, ws2 = AsyncMock(), AsyncMock()
+    connection_store.add("1", ws1)
+    connection_store.add("2", ws2)
 
-    await server.broadcast_room_update(
-        "room1"
-    )
+    await manager.close_all()
 
-
-    assert True
-
-
-
-@pytest.mark.asyncio
-async def test_invalid_room_update():
-
-    await server.broadcast_room_update(
-        "unknown"
-    )
-
-    assert True
-
-
-
-# =====================================================
-# chat broadcast
-# =====================================================
-
-
-@pytest.mark.asyncio
-async def test_broadcast_chat_payload():
-
-    ws=AsyncMock()
-
-    server.connected_clients={
-        "1001":ws
-    }
-
-
-    await server.broadcast_chat_message(
-        {
-            "message":"hello"
-        }
-    )
-
-
-    ws.send_text.assert_called_once()
-
-
-
-# =====================================================
-# typing
-# =====================================================
-
-
-@pytest.mark.asyncio
-async def test_typing_start():
-
-    await server.broadcast_typing(
-        "typing_start",
-        "user1",
-        "player1"
-    )
-
-    assert True
-
-
-
-@pytest.mark.asyncio
-async def test_typing_stop():
-
-    await server.broadcast_typing(
-        "typing_stop",
-        "user1",
-        "player1"
-    )
-
-    assert True
-
-
-
-# =====================================================
-# online users
-# =====================================================
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_online_one_user(mock_execute):
-
-    server.connected_clients = {
-        "1": None
-    }
-
-    mock_execute.return_value = [
-        {
-            "id": "1",
-            "name": "player1",
-            "color": "red"
-        }
-    ]
-
-    await server.broadcast_online_users()
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_online_multiple_users(mock_execute):
-
-    server.clients={
-        "user1":None,
-        "user2":None
-    }
-
-    mock_execute.return_value = [
-        {"id": "user1", "name": "player1", "color": "red"},
-        {"id": "user2", "name": "player2", "color": "blue"}
-    ]
-
-    await server.broadcast_online_users()
-    mock_execute.assert_called()
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_online_empty(mock_execute):
-
-    server.clients=[]
-
-    mock_execute.return_value = []
-
-    await server.broadcast_online_users()
-    mock_execute.assert_called()
+    ws1.close.assert_awaited_once()
+    ws2.close.assert_awaited_once()
+    assert connection_store.ids() == []

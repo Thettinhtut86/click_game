@@ -1,513 +1,153 @@
+from datetime import datetime
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, patch
 
-from backend import server
-
-
-# =====================================================
-# handle_send_message()
-# =====================================================
+from click_game.repositories.chat_repository import ChatRepository
+from click_game.repositories.player_repository import PlayerRepository
+from click_game.services.chat_service import ChatService, MAX_MESSAGE_LENGTH
 
 
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_to_all", new_callable=AsyncMock)
-@patch("backend.server.execute")
-async def test_send_normal_message(
-    mock_execute,
-    mock_broadcast
-):
+def make_service(player=None):
+    chat = MagicMock(spec=ChatRepository)
+    players = MagicMock(spec=PlayerRepository)
+    players.get.return_value = player
+    return ChatService(chat, players), chat, players
 
-    mock_execute.side_effect=[
-        [{"color":"red"}],
-        1,
-        1
+
+def test_send_normal_message():
+    service, chat, players = make_service({"color": "red"})
+    chat.create.return_value = 10
+
+    message = service.send("1001", "Alice", " hello ", ["1001", "2001"])
+
+    assert message["id"] == 10
+    assert message["uid"] == "1001"
+    assert message["text"] == "hello"
+    assert message["color"] == "red"
+    assert message["mentions"] == []
+    chat.create.assert_called_once_with("1001", "Alice", "red", "hello")
+    chat.increment_unread.assert_called_once_with("2001")
+
+
+def test_send_empty_message():
+    service, chat, _ = make_service()
+    assert service.send("1", "Alice", "   ", ["2"]) is None
+    chat.create.assert_not_called()
+
+
+def test_send_too_long_message():
+    service, chat, _ = make_service()
+    assert service.send("1", "Alice", "x" * (MAX_MESSAGE_LENGTH + 1), ["2"]) is None
+    chat.create.assert_not_called()
+
+
+def test_send_without_player_uses_white():
+    service, chat, _ = make_service(None)
+    chat.create.return_value = 1
+    message = service.send("1", "Alice", "hello", [])
+    assert message["color"] == "#ffffff"
+
+
+def test_send_detects_mentions():
+    service, chat, _ = make_service({"color": "red"})
+    chat.create.return_value = 1
+    message = service.send("1", "Alice", "hello @bob @Alice_1", [])
+    assert message["mentions"] == ["bob", "Alice_1"]
+
+
+def test_send_does_not_increment_sender():
+    service, chat, _ = make_service({"color": "red"})
+    chat.create.return_value = 1
+    service.send("1", "Alice", "hello", ["1"])
+    chat.increment_unread.assert_not_called()
+
+
+def test_history_formats_datetime_and_string():
+    service, chat, _ = make_service()
+    chat.history_today.return_value = [
+        {
+            "id": 1,
+            "player_id": "1",
+            "player_name": "Alice",
+            "player_color": "red",
+            "message": "hello",
+            "deleted": 0,
+            "created_at": datetime(2026, 1, 1, 12, 34),
+        },
+        {
+            "id": 2,
+            "player_id": "2",
+            "player_name": "Bob",
+            "player_color": "blue",
+            "message": "hi",
+            "deleted": 1,
+            "created_at": "2026-01-01 13:45:00",
+        },
     ]
 
-    result = await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
+    assert service.history() == [
         {
-            "text":"hello"
-        }
-    )
-
-    assert result is None
-
-    mock_broadcast.assert_called_once()
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_send_empty_messagem(mock_execute):
-
-    await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
+            "id": 1,
+            "uid": "1",
+            "name": "Alice",
+            "color": "red",
+            "text": "hello",
+            "deleted": 0,
+            "timestamp": "12:34",
+        },
         {
-            "text": ""
-        }
-    )
-
-    mock_execute.assert_not_called()
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_send_too_long_message(mock_execute):
-
-    await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
-        {
-            "text":"x"*301
-        }
-    )
-
-    mock_execute.assert_not_called()
-
-
-
-@pytest.mark.asyncio
-@patch(
-    "backend.server.broadcast_to_all",
-    new_callable=AsyncMock
-)
-@patch("backend.server.execute")
-async def test_mention_detection(
-    mock_execute,
-    mock_broadcast
-):
-
-    mock_execute.side_effect=[
-        [{"color":"red"}],
-        1,
-        1
-    ]
-
-
-    await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
-        {
-            "text":"hello @user"
-        }
-    )
-
-
-    assert mock_broadcast.call_count == 2
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_to_all")
-@patch("backend.server.execute")
-async def test_multiple_mentions(mock_execute, mock_broadcast):
-
-    mock_execute.side_effect = [
-        [{"color": "red"}],
-        1,
-        1
-    ]
-
-    await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
-        {
-            "text": "@user1 @user2 hello"
-        }
-    )
-
-    assert mock_broadcast.call_count >= 3
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_to_all", new_callable=AsyncMock)
-@patch("backend.server.execute")
-async def test_send_message_without_player_color(
-    mock_execute,
-    mock_broadcast
-):
-
-    mock_execute.side_effect=[
-        [],
-        1,
-        1
+            "id": 2,
+            "uid": "2",
+            "name": "Bob",
+            "color": "blue",
+            "text": "hi",
+            "deleted": 1,
+            "timestamp": "13:45",
+        },
     ]
 
 
-    await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
-        {
-            "text":"hello"
-        }
-    )
+def test_delete_owner():
+    service, chat, _ = make_service()
+    chat.get_owner.return_value = {"player_id": "1"}
+    assert service.delete("1", 10) is True
+    chat.set_deleted.assert_called_once_with(10, True)
 
 
-    message = mock_broadcast.call_args[0][0]
+def test_delete_non_owner():
+    service, chat, _ = make_service()
+    chat.get_owner.return_value = {"player_id": "2"}
+    assert service.delete("1", 10) is False
+    chat.set_deleted.assert_not_called()
 
-    assert message["message"]["color"]=="#ffffff"
 
+def test_delete_missing_message():
+    service, chat, _ = make_service()
+    chat.get_owner.return_value = None
+    assert service.delete("1", 10) is False
 
 
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-@patch("backend.server.broadcast_to_all")
-async def test_message_saved(mock_broadcast, mock_execute):
+def test_restore_owner():
+    service, chat, _ = make_service()
+    chat.get_owner.return_value = {"player_id": "1"}
+    assert service.restore("1", 10) is True
+    chat.set_deleted.assert_called_once_with(10, False)
 
-    mock_execute.side_effect = [
-        [{"color": "red"}],
-        1,
-        1
-    ]
 
-    await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
-        {
-            "text": "hello"
-        }
-    )
+def test_restore_non_owner():
+    service, chat, _ = make_service()
+    chat.get_owner.return_value = {"player_id": "2"}
+    assert service.restore("1", 10) is False
 
-    assert mock_execute.called
 
+def test_mark_seen_delegates():
+    service, chat, _ = make_service()
+    service.mark_seen("1")
+    chat.mark_seen.assert_called_once_with("1")
 
 
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_to_all")
-@patch("backend.server.execute")
-async def test_message_broadcast(mock_execute, mock_broadcast):
-
-    mock_execute.side_effect = [
-        [{"color": "red"}],
-        1,
-        1
-    ]
-
-    await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
-        {
-            "text": "hello"
-        }
-    )
-
-    mock_broadcast.assert_called()
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-@patch("backend.server.broadcast_to_all")
-async def test_unread_increment(mock_broadcast, mock_execute):
-
-    server.connected_clients = {
-        "2001": None
-    }
-
-    mock_execute.side_effect = [
-        [{"color": "red"}],  # SELECT color
-        1,                   # INSERT daily_chat
-        1                    # INSERT chat_unread
-    ]
-
-    await server.handle_send_message(
-        None,
-        "1001",
-        "player1",
-        {
-            "text": "hello"
-        }
-    )
-
-    assert mock_execute.call_count == 3
-
-
-
-# =====================================================
-# handle_delete_message()
-# =====================================================
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_to_all")
-@patch("backend.server.execute")
-async def test_delete_owner_message(mock_execute, mock_broadcast):
-
-    mock_execute.side_effect = [
-        [
-            {
-                "player_id": "1001"
-            }
-        ],
-        1
-    ]
-
-    result = await server.handle_delete_message(
-        "1001",
-        {
-            "message_id": 1
-        }
-    )
-
-    assert result is None
-    mock_broadcast.assert_called_once()
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_delete_not_owner(mock_execute):
-
-    mock_execute.return_value = [
-        {
-            "player_id": "2000"
-        }
-    ]
-
-    result = await server.handle_delete_message(
-        "1001",
-        {
-            "message_id": 1
-        }
-    )
-
-    assert result is None
-
-
-
-@pytest.mark.asyncio
-async def test_delete_missing_id():
-
-    result = await server.handle_delete_message(
-        "1001",
-        {}
-    )
-
-    assert result is None
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_delete_unknown_id(mock_execute):
-
-    mock_execute.return_value = []
-
-    result = await server.handle_delete_message(
-        "1001",
-        {
-            "message_id": 99999
-        }
-    )
-
-    assert result is None
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_to_all")
-@patch("backend.server.execute")
-async def test_delete_broadcast(mock_execute, mock_broadcast):
-
-    mock_execute.side_effect = [
-        [
-            {
-                "player_id": "1001"
-            }
-        ],
-        1
-    ]
-
-    await server.handle_delete_message(
-        "1001",
-        {
-            "message_id": 1
-        }
-    )
-
-    mock_broadcast.assert_called_once()
-
-
-
-# =====================================================
-# handle_restore_message()
-# =====================================================
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_to_all")
-@patch("backend.server.execute")
-async def test_restore_owner_message(mock_execute, mock_broadcast):
-
-    mock_execute.side_effect = [
-        [
-            {
-                "player_id": "1001"
-            }
-        ],
-        1
-    ]
-
-    result = await server.handle_restore_message(
-        "1001",
-        {
-            "message_id": 1
-        }
-    )
-
-    assert result is None
-    mock_broadcast.assert_called_once()
-
-
-
-@pytest.mark.asyncio
-async def test_restore_missing_id():
-
-    result = await server.handle_restore_message(
-        "1001",
-        {}
-    )
-
-    assert result is None
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_restore_not_owner(mock_execute):
-
-    mock_execute.return_value = [
-        {
-            "player_id": "2000"
-        }
-    ]
-
-    result = await server.handle_restore_message(
-        "1001",
-        {
-            "message_id": 1
-        }
-    )
-
-    assert result is None
-
-
-
-# =====================================================
-# mark_seen()
-# =====================================================
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-@patch("backend.server.fetch_one")
-async def test_mark_seen_last_message(
-        mock_fetch_one,
-        mock_execute
-):
-
-    mock_fetch_one.return_value = {
-        "last_id":10
-    }
-
-
-    mock_execute.return_value = 1
-
-
-    result = await server.mark_seen(
-        "1001"
-    )
-
-
-    assert result is None
-
-
-    mock_fetch_one.assert_called_once()
-
-
-    mock_execute.assert_called_once_with(
-        """
-        UPDATE chat_unread
-        SET last_seen=%s
-        WHERE user_id=%s
-        """,
-        (
-            10,
-            "1001"
-        ),
-        commit=True
-    )
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_mark_seen_no_messages(mock_execute):
-
-    mock_execute.side_effect = [
-        [
-            {
-                "last_id": None
-            }
-        ],
-        1,
-        1
-    ]
-
-    result = await server.mark_seen(
-        "1001"
-    )
-
-    assert result is None
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_reset_unread(mock_execute):
-
-    mock_execute.side_effect = [
-        [
-            {
-                "last_id": 5
-            }
-        ],
-        1,
-        1
-    ]
-
-    await server.mark_seen(
-        "1001"
-    )
-
-    assert mock_execute.called
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.execute")
-async def test_insert_chat_reads(mock_execute):
-
-    mock_execute.side_effect = [
-        [
-            {
-                "last_id": 5
-            }
-        ],
-        1,
-        1
-    ]
-
-    await server.mark_seen(
-        "1001"
-    )
-
-    assert mock_execute.call_count >= 2
+def test_cleanup_delegates():
+    service, chat, _ = make_service()
+    service.cleanup()
+    chat.cleanup.assert_called_once()

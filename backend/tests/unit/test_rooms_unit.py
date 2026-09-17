@@ -1,398 +1,220 @@
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
 
-from backend import server
+from click_game.repositories.player_repository import PlayerRepository
+from click_game.repositories.room_repository import RoomRepository
+from click_game.services.room_service import RoomService
+from click_game.state.rooms import RoomStore, room_store
 
 
-# =====================================================
-# get_rooms_data()
-# =====================================================
+@pytest.fixture(autouse=True)
+def clear_rooms():
+    room_store.clear()
+    yield
+    room_store.clear()
 
 
-@patch("backend.server.execute")
-def test_get_rooms_empty_database(mock_execute):
+def test_room_store_ensure_defaults():
+    room = RoomStore.ensure({})
+    assert room["players"] == []
+    assert room["watchers"] == []
+    assert room["game_started"] is False
+    assert room["option"] == "asc"
+    assert room["bubbles"] == {}
+    assert room["index"] == 0
+    assert room["play_order"] == []
+    assert room["display_order"] == []
 
-    mock_execute.return_value = []
 
+def test_room_store_ensure_assigns_first_player_as_host():
+    room = RoomStore.ensure({
+        "players": [{"id": 123, "name": "Alice", "color": "red"}],
+    })
+    assert room["host"] == "123"
+    assert room["players"][0]["id"] == "123"
 
-    result = server.get_rooms_data()
 
+def test_room_store_ensure_keeps_existing_host():
+    room = RoomStore.ensure({
+        "host": "99",
+        "players": [{"id": 1, "name": "Alice"}],
+    })
+    assert room["host"] == "99"
 
-    assert result == []
 
+def test_room_store_get_set_pop():
+    store = RoomStore()
+    room = {"host": "1"}
+    store.set("1", room)
+    assert store.get(1) is room
+    assert store.pop("1") is room
+    assert store.get("1") is None
+
 
+def test_room_store_clear():
+    store = RoomStore()
+    store.set("1", {})
+    store.clear()
+    assert list(store.all()) == []
 
-@patch("backend.server.execute")
-def test_get_rooms_one_room(mock_execute):
 
-    mock_execute.return_value = [
-        {
-            "id":1,
-            "name":"room1"
-        }
-    ]
+def test_room_service_list_rooms():
+    rooms = MagicMock(spec=RoomRepository)
+    rooms.list_rooms.return_value = [{"id": 1}]
+    service = RoomService(MagicMock(spec=PlayerRepository), rooms)
+    assert service.list_rooms() == [{"id": 1}]
 
 
-    result = server.get_rooms_data()
+def test_room_service_create():
+    players = MagicMock(spec=PlayerRepository)
+    players.get.return_value = {"id": "1", "name": "Alice", "color": "red"}
+    rooms = MagicMock(spec=RoomRepository)
+    rooms.create.return_value = 10
 
+    room_id, room = RoomService(players, rooms).create("1", "Alice", "desc")
 
-    assert len(result) == 1
+    assert room_id == "10"
+    assert room["host"] == "1"
+    assert room["option"] == "desc"
+    assert room["players"][0]["color"] == "red"
+    players.update_room.assert_called_once_with("1", "10")
 
 
+def test_room_service_create_invalid_option_defaults_to_asc():
+    players = MagicMock(spec=PlayerRepository)
+    players.get.return_value = {"id": "1", "name": "Alice", "color": "red"}
+    rooms = MagicMock(spec=RoomRepository)
+    rooms.create.return_value = 10
 
-@patch("backend.server.execute")
-def test_get_rooms_multiple_rooms(mock_execute):
+    _, room = RoomService(players, rooms).create("1", "Alice", "invalid")
+    assert room["option"] == "asc"
 
-    mock_execute.return_value = [
-        {"id":1},
-        {"id":2}
-    ]
 
+def test_room_service_create_failure():
+    players = MagicMock(spec=PlayerRepository)
+    rooms = MagicMock(spec=RoomRepository)
+    rooms.create.return_value = None
 
-    result = server.get_rooms_data()
+    with pytest.raises(RuntimeError, match="Failed to create room"):
+        RoomService(players, rooms).create("1", "Alice", "asc")
 
 
-    assert len(result) == 2
+def test_room_service_join_player():
+    players = MagicMock(spec=PlayerRepository)
+    players.get.return_value = {"id": "2", "name": "Bob", "color": "blue"}
+    rooms = MagicMock(spec=RoomRepository)
 
+    room_store.set("1", RoomStore.ensure({
+        "host": "1",
+        "players": [{"id": "1", "name": "Alice", "color": "red"}],
+    }))
 
+    kind, room = RoomService(players, rooms).join("1", "2", "Bob")
+    assert kind == "player"
+    assert room["players"][-1]["id"] == "2"
+    players.update_room.assert_called_once_with("2", "1")
+
 
-@patch("backend.server.execute")
-def test_get_rooms_date_format(mock_execute):
+def test_room_service_join_duplicate_player():
+    players = MagicMock(spec=PlayerRepository)
+    rooms = MagicMock(spec=RoomRepository)
+    room_store.set("1", RoomStore.ensure({
+        "host": "1",
+        "players": [{"id": "1", "name": "Alice", "color": "red"}],
+    }))
 
-    mock_execute.return_value = [
-        {
-            "created_at": datetime(2026, 1, 1, 10, 0, 0)
-        }
-    ]
+    kind, _ = RoomService(players, rooms).join("1", "1", "Alice")
+    assert kind == "player"
+    players.update_room.assert_not_called()
 
-    result = server.get_rooms_data()
 
-    assert result[0]["created_at"] == "2026-01-01 10:00:00"
+def test_room_service_join_watcher_when_full():
+    players = MagicMock(spec=PlayerRepository)
+    rooms = MagicMock(spec=RoomRepository)
+    room_store.set("1", RoomStore.ensure({
+        "host": "1",
+        "players": [{"id": str(i), "name": f"P{i}", "color": None} for i in range(4)],
+    }))
 
+    kind, room = RoomService(players, rooms).join("1", "5", "Watcher")
+    assert kind == "watcher"
+    assert room["watchers"] == [{"id": "5", "name": "Watcher"}]
 
 
-@patch("backend.server.execute")
-def test_get_rooms_sql_exception(mock_execute):
+def test_room_service_join_existing_watcher_is_not_duplicated():
+    players = MagicMock(spec=PlayerRepository)
+    rooms = MagicMock(spec=RoomRepository)
+    room_store.set("1", RoomStore.ensure({
+        "host": "1",
+        "players": [{"id": str(i), "name": f"P{i}", "color": None} for i in range(4)],
+        "watchers": [{"id": "5", "name": "Watcher"}],
+    }))
 
-    mock_execute.side_effect = Exception(
-        "SQL error"
-    )
+    kind, room = RoomService(players, rooms).join("1", "5", "Watcher")
+    assert kind == "watcher"
+    assert len(room["watchers"]) == 1
 
 
-    with pytest.raises(Exception):
+def test_room_service_join_missing_room():
+    with pytest.raises(ValueError, match="Room not found"):
+        RoomService(MagicMock(), MagicMock()).join("999", "1", "Alice")
 
-        server.get_rooms_data()
 
+def test_room_service_join_started_room():
+    room_store.set("1", RoomStore.ensure({"game_started": True}))
+    with pytest.raises(ValueError, match="Game already started"):
+        RoomService(MagicMock(), MagicMock()).join("1", "2", "Bob")
 
 
-# =====================================================
-# remove_player_from_room()
-# =====================================================
+def test_remove_player_keeps_non_empty_room():
+    players = MagicMock(spec=PlayerRepository)
+    rooms = MagicMock(spec=RoomRepository)
+    room_store.set("1", RoomStore.ensure({
+        "players": [{"id": "1"}, {"id": "2"}],
+        "watchers": [],
+    }))
 
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_rooms", new_callable=AsyncMock)
-@patch("backend.server.execute")
-async def test_remove_player(
-    mock_execute,
-    mock_broadcast
-):
+    RoomService(players, rooms).remove_player("1", "1")
+    assert [p["id"] for p in room_store.get("1")["players"]] == ["2"]
+    players.update_room.assert_called_once_with("1", None)
+    rooms.delete.assert_not_called()
 
-    server.rooms_state = {
-        "room1":{
-            "players":[
-                {
-                    "id":"1",
-                    "name":"test"
-                }
-            ],
-            "watchers":[]
-        }
-    }
-
-    await server.remove_player_from_room(
-        "1",        
-        "room1"     
-    )
-
-    assert "room1" not in server.rooms_state
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_room_update", new_callable=AsyncMock)
-@patch("backend.server.broadcast_rooms", new_callable=AsyncMock)
-@patch("backend.server.execute")
-async def test_remove_watcher(
-    mock_execute,
-    mock_rooms,
-    mock_update
-):
-
-    server.rooms_state = {
-        "room1":{
-            "players":[
-                {
-                    "id":"2"
-                }
-            ],
-            "watchers":[
-                {
-                    "id":"1"
-                }
-            ]
-        }
-    }
-
-    await server.remove_player_from_room(
-        "1",
-        "room1"
-    )
-
-    assert len(server.rooms_state["room1"]["watchers"]) == 0
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_room_update", new_callable=AsyncMock)
-@patch("backend.server.execute")
-async def test_remove_nonexistent_player(
-    mock_execute,
-    mock_update
-):
-
-    server.rooms_state = {
-        "room1":{
-            "players":[
-                {
-                    "id":"2"
-                }
-            ],
-            "watchers":[]
-        }
-    }
-
-    await server.remove_player_from_room(
-        "100",
-        "room1"
-    )
-
-    assert len(server.rooms_state["room1"]["players"]) == 1
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_rooms", new_callable=AsyncMock)
-@patch("backend.server.execute")
-async def test_delete_empty_room(
-    mock_execute,
-    mock_rooms
-):
-
-    server.rooms_state = {
-        "room1":{
-            "players":[
-                {
-                    "id":"1"
-                }
-            ],
-            "watchers":[]
-        }
-    }
-
-    await server.remove_player_from_room(
-        "1",
-        "room1"
-    )
-
-    assert "room1" not in server.rooms_state
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_room_update", new_callable=AsyncMock)
-@patch("backend.server.execute")
-async def test_keep_non_empty_room(
-    mock_execute,
-    mock_update
-):
-
-    server.rooms_state = {
-        "room1":{
-            "players":[
-                {
-                    "id":"1"
-                },
-                {
-                    "id":"2"
-                }
-            ],
-            "watchers":[]
-        }
-    }
-
-    await server.remove_player_from_room(
-        "1",
-        "room1"
-    )
-
-    assert "room1" in server.rooms_state
-    assert len(server.rooms_state["room1"]["players"]) == 1
-
-
-
-@pytest.mark.asyncio
-@patch("backend.server.broadcast_room_update", new_callable=AsyncMock)
-@patch("backend.server.execute")
-async def test_database_update_called(
-    mock_execute,
-    mock_update
-):
-
-    server.rooms_state = {
-        "room1":{
-            "players":[
-                {
-                    "id":"1"
-                },
-                {
-                    "id":"2"
-                }
-            ],
-            "watchers":[]
-        }
-    }
-
-    await server.remove_player_from_room(
-        "1",
-        "room1"
-    )
-
-    assert mock_execute.called
-
-
-
-# =====================================================
-# close_room()
-# =====================================================
-
-
-@pytest.mark.asyncio
-@patch(
-    "backend.server.broadcast_rooms",
-    new_callable=AsyncMock
-)
-@patch(
-    "backend.server.execute"
-)
-async def test_close_room_host_disconnect(
-    mock_execute,
-    mock_broadcast
-):
-
-    server.rooms_state = {
-        "room1":{
-            "players":[
-                {
-                    "id":"1",
-                    "name":"Alice"
-                }
-            ],
-            "watchers":[]
-        }
-    }
-
-
-    await server.close_room(
-        "room1"
-    )
-
-
-    assert mock_execute.call_count == 2
-
-    mock_broadcast.assert_called_once()
-
-    assert "room1" not in server.rooms_state
-
-
-
-@pytest.mark.asyncio
-@patch(
-    "backend.server.broadcast_rooms",
-    new_callable=AsyncMock
-)
-@patch(
-    "backend.server.execute"
-)
-async def test_close_room_clear_state(
-    mock_execute,
-    mock_broadcast
-):
-
-    server.rooms_state = {
-        "room1": {
-            "players": [],
-            "watchers": []
-        }
-    }
-
-    await server.close_room(
-        "room1"
-    )
-
-    assert "room1" not in server.rooms_state
-    assert mock_execute.call_count == 2
-    mock_broadcast.assert_awaited_once()
-
-@pytest.mark.asyncio
-async def test_close_room_missing_room():
-
-    server.rooms_state={}
-
-
-    result = await server.close_room(
-        "unknown"
-    )
 
+def test_remove_last_player_deletes_room():
+    players = MagicMock(spec=PlayerRepository)
+    rooms = MagicMock(spec=RoomRepository)
+    room_store.set("1", RoomStore.ensure({"players": [{"id": "1"}], "watchers": []}))
 
+    RoomService(players, rooms).remove_player("1", "1")
+    assert room_store.get("1") is None
+    rooms.delete.assert_called_once_with("1")
+
+
+def test_remove_watcher():
+    players = MagicMock(spec=PlayerRepository)
+    rooms = MagicMock(spec=RoomRepository)
+    room_store.set("1", RoomStore.ensure({
+        "players": [{"id": "2"}],
+        "watchers": [{"id": "1", "name": "Watcher"}],
+    }))
+
+    RoomService(players, rooms).remove_player("1", "1")
+    assert room_store.get("1")["watchers"] == []
+
+
+def test_close_room():
+    players = MagicMock(spec=PlayerRepository)
+    rooms = MagicMock(spec=RoomRepository)
+    room_store.set("1", RoomStore.ensure({"players": [{"id": "1"}]}))
+
+    closed = RoomService(players, rooms).close("1")
+    assert closed is not None
+    assert room_store.get("1") is None
+    rooms.delete.assert_called_once_with("1")
+    rooms.clear_players.assert_called_once_with("1")
+
+
+def test_close_missing_room():
+    result = RoomService(MagicMock(), MagicMock()).close("999")
     assert result is None
-
-@pytest.mark.asyncio
-@patch(
-    "backend.server.broadcast_rooms",
-    new_callable=AsyncMock
-)
-@patch(
-    "backend.server.execute"
-)
-async def test_close_room_notify_player(
-    mock_execute,
-    mock_broadcast
-):
-
-    ws = AsyncMock()
-    server.connected_clients = {
-        "1": ws
-    }
-
-    server.rooms_state = {
-        "room1": {
-            "players": [
-                {
-                    "id": "1"
-                }
-            ],
-            "watchers": []
-        }
-    }
-
-    await server.close_room(
-        "room1"
-    )
-
-    ws.send_text.assert_called_once()
-    message = ws.send_text.call_args[0][0]
-
-    assert "room_closed" in message
-    assert mock_execute.call_count == 2
-
-    mock_broadcast.assert_awaited_once()

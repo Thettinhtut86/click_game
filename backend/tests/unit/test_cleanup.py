@@ -1,90 +1,39 @@
-import asyncio
-import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from backend import server
+import pytest
+
+from click_game.services import cleanup_service
+from click_game.state.rooms import room_store
+
+
+@pytest.fixture(autouse=True)
+def clean_rooms():
+    room_store.clear()
+    yield
+    room_store.clear()
 
 
 @pytest.mark.asyncio
-@patch("backend.server.broadcast_to_all")
-@patch("backend.server.execute")
-async def test_run_daily_cleanup(
-    mock_execute,
-    mock_broadcast,
-):
-    await server.run_daily_cleanup()
+async def test_run_daily_cleanup():
+    chat = MagicMock()
+    room_store.set("1", {})
+    with patch.object(cleanup_service, "ChatService", return_value=chat), \
+         patch.object(cleanup_service, "execute") as execute, \
+         patch.object(cleanup_service.websocket_manager, "broadcast", new_callable=AsyncMock) as broadcast:
+        await cleanup_service.run_daily_cleanup()
 
-    assert mock_execute.call_count == 4
-    mock_broadcast.assert_called_once()
-
-
-@patch("backend.server.asyncio.create_task")
-@patch("backend.server.execute")
-def test_startup_empty_db(
-    mock_execute,
-    mock_task,
-):
-
-    mock_execute.return_value = []
-
-    server.rooms_state.clear()
-
-    server.startup()
-
-    mock_task.assert_called_once()
-    assert server.rooms_state == {}
+    chat.cleanup.assert_called_once()
+    execute.assert_called_once_with(
+        "DELETE FROM players WHERE created_at < CURDATE()",
+        commit=True,
+    )
+    assert room_store.get("1") is None
+    broadcast.assert_awaited_once_with({"action": "chat_reset"})
 
 
-@patch("backend.server.asyncio.create_task")
-@patch("backend.server.execute")
-def test_startup_load_room(
-    mock_execute,
-    mock_task,
-):
-
-    mock_execute.side_effect = [
-        [
-            {
-                "id": 1,
-                "host_id": 10,
-                "started": False
-            }
-        ],
-        [
-            {
-                "id": 10,
-                "name": "Alice",
-                "room_id": 1,
-                "joined_at": None,
-                "color": "red"
-            }
-        ]
-    ]
-
-    server.rooms_state.clear()
-
-    server.startup()
-
-    assert "1" in server.rooms_state
-
-    room = server.rooms_state["1"]
-
-    assert room["host"] == "10"
-    assert room["players"][0]["name"] == "Alice"
-
-
-@patch("backend.server.asyncio.create_task")
-@patch("backend.server.execute")
-def test_startup_db_exception(
-    mock_execute,
-    mock_task,
-):
-
-    mock_execute.side_effect = Exception("DB failed")
-
-    server.rooms_state.clear()
-
-    # Should not raise
-    server.startup()
-
-    assert server.rooms_state == {}    
+@pytest.mark.asyncio
+async def test_daily_cleanup_loop_swallows_cleanup_exception():
+    with patch.object(cleanup_service, "run_daily_cleanup", new_callable=AsyncMock, side_effect=RuntimeError("DB")), \
+         patch.object(cleanup_service.asyncio, "sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            await cleanup_service.daily_cleanup_loop()
