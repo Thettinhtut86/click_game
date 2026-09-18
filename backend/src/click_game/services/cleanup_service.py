@@ -4,13 +4,12 @@ from datetime import datetime, timedelta
 from click_game.services.chat_service import ChatService
 from click_game.state.rooms import room_store
 from click_game.websocket.manager import websocket_manager
+from click_game.db.database import execute
 
 
 async def run_daily_cleanup():
     ChatService().cleanup()
-
-    # Preserve the supplied application's daily reset behavior.
-    from click_game.db.database import execute
+    
     execute("DELETE FROM players WHERE created_at < CURDATE()", commit=True)
 
     room_store.clear()

@@ -158,7 +158,7 @@ def test_room_service_join_existing_watcher_is_not_duplicated():
 
 def test_room_service_join_missing_room():
     with pytest.raises(ValueError, match="Room not found"):
-        RoomService(MagicMock(), MagicMock()).join("999", "1", "Alice")
+        RoomService.join(1, "missing-room")
 
 
 def test_room_service_join_started_room():
