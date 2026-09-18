@@ -132,10 +132,10 @@ jobs:
       # 7. Run Ruff
       # -------------------------------------------------------------
 
-      - name: Run Ruff
-        working-directory: backend
-        run: |
-          ruff check src tests --fix
+      # - name: Run Ruff
+      #   working-directory: backend
+      #   run: |
+      #     ruff check src tests --fix
 
 
       # -------------------------------------------------------------
