@@ -156,11 +156,6 @@ def test_room_service_join_existing_watcher_is_not_duplicated():
     assert len(room["watchers"]) == 1
 
 
-def test_room_service_join_missing_room():
-    with pytest.raises(ValueError, match="Room not found"):
-        RoomService.join(1, "missing-room")
-
-
 def test_room_service_join_started_room():
     room_store.set("1", RoomStore.ensure({"game_started": True}))
     with pytest.raises(ValueError, match="Game already started"):

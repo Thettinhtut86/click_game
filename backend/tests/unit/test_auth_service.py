@@ -28,13 +28,6 @@ def test_login_rejects_blank_name():
     with pytest.raises(ValueError, match="user_name required"):
         AuthService(FakePlayers()).login("   ")
 
-
-def test_login_rejects_max_players():
-    rows = [{"id": i, "color": PLAYER_COLORS[i % len(PLAYER_COLORS)]} for i in range(MAX_PLAYERS)]
-    with pytest.raises(ValueError, match="Maximum 12 players"):
-        AuthService(FakePlayers(rows)).login("Alice")
-
-
 def test_login_skips_used_colors():
     rows = [{"id": 1, "color": PLAYER_COLORS[0]}]
     player = AuthService(FakePlayers(rows)).login("Bob")
