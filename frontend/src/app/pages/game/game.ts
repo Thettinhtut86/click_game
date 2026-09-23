@@ -27,6 +27,9 @@ export class Game implements OnInit, OnDestroy {
   scores: Record<string, number> = {};
 
   gameStarted = false;
+  errorMessage = '';
+  errorMessageType: 'wrong' | 'delay' | '' = '';
+  private errorTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private route: ActivatedRoute,
@@ -60,6 +63,20 @@ export class Game implements OnInit, OnDestroy {
           this.bubbles = { ...msg.bubbles }; // IMPORTANT
           this.updateScores();
           break;
+        
+        case 'wrong_bubble':
+          this.showGameMessage(
+            msg.message,
+            'wrong'
+          );
+          break;
+        
+        case 'click_delayed':
+          this.showGameMessage(
+            msg.message,
+            'delay'
+          );
+          break;
 
         case 'end_game':
           this.handleEndGame(msg);
@@ -69,10 +86,10 @@ export class Game implements OnInit, OnDestroy {
           alert(msg.message);
           this.router.navigate(['/menu']);
           break;
-      }
-
+        
+      }     
       this.cd.detectChanges(); // FORCE UI REFRESH
-    });
+    });          
   });
   }
 
@@ -176,6 +193,20 @@ export class Game implements OnInit, OnDestroy {
     this.router.navigate(['/menu']);
   }
 
+  private showGameMessage(message: string, type: 'wrong' | 'delay'): void {
+    this.errorMessage = message;
+    this.errorMessageType = type;
+
+    if (this.errorTimer) {
+      clearTimeout(this.errorTimer);
+    }
+
+    this.errorTimer = setTimeout(() => {
+      this.errorMessage = '';
+      this.errorMessageType = '';
+     }, 3000);
+  }
+
   // ---------------------------
   // QUIT
   // ---------------------------
@@ -194,6 +225,8 @@ export class Game implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
-    // optional cleanup (unsubscribe if you later store subscription)
+    if (this.errorTimer) {
+      clearTimeout(this.errorTimer);
+    }
   }
 }

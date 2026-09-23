@@ -323,7 +323,7 @@ class WebSocketService:
         player["color"] = color
 
         try:
-            finished = game_service.select_bubble(
+            result = game_service.select_bubble(
                 room,
                 user_id,
                 bubble_id,
@@ -336,18 +336,45 @@ class WebSocketService:
             )
             return
 
-        await websocket_manager.broadcast_room(
-            str(room_id),
-            {
-                "action": "update_bubbles",
-                "roomId": str(room_id),
-                "bubbles": room["bubbles"],
-                "currentIndex": room["index"],
-            },
-        )
+        if result["status"] == "wrong_bubble":
+            await websocket_manager.send(
+                websocket,
+                {
+                    "action": "wrong_bubble",
+                    "message": result["message"],
+                    "wrong_clicks": result["wrong_clicks"],
+                    "expected": result["expected"],
+                },
+            )
+            return
 
-        if finished:
-            await self.end_game(str(room_id), room)
+        if result["status"] == "click_delayed":
+            await websocket_manager.send(
+                websocket,
+                {
+                    "action": "wrong_bubble",
+                    "message": result["message"],
+                    "remaining": result["remaining"],
+                },
+            )
+            return
+
+        if result["status"] == "correct":
+            await websocket_manager.broadcast_room(
+                str(room_id),
+                {
+                    "action": "update_bubbles",
+                    "roomId": str(room_id),
+                    "bubbles": room["bubbles"],
+                    "currentIndex": room["index"],
+                },
+            )
+
+            if result["finished"]:
+                await self.end_game(
+                    room_id,
+                    room
+                )
 
     async def end_game(self, room_id: str, room: dict):
         scores = game_service.calculate_scores(room)
