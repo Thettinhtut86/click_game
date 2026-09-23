@@ -24,8 +24,8 @@ class AuthService:
         if len(players) >= MAX_PLAYERS:
             raise ValueError("Maximum 12 players allowed")
 
-        used = {p["color"] for p in players if p.get("color")}
-        available = [c for c in PLAYER_COLORS if c not in used]
+        used = {player["color"] for player in players if player.get("color")}
+        available = [color for color in PLAYER_COLORS if color not in used]
 
         if not available:
             raise ValueError("No colors available")
