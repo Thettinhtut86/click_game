@@ -34,9 +34,9 @@ def test_login_skips_used_colors():
     assert player["color"] == PLAYER_COLORS[1]
 
 
-def test_login_rejects_when_all_colors_used():
-    rows = [{"id": i, "color": color} for i, color in enumerate(PLAYER_COLORS)]
-    with pytest.raises(ValueError, match="No colors available"):
+def test_login_rejects_when_max_players_reached():
+    rows = [{"id":1,"color":PLAYER_COLORS[i]}for i in range(MAX_PLAYERS)]
+    with pytest.raises(ValueError, match="Maximum 12 players allowed"):
         AuthService(FakePlayers(rows)).login("Alice")
 
 

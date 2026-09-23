@@ -20,14 +20,17 @@ async def run_daily_cleanup():
 async def daily_cleanup_loop():
     while True:
         now = datetime.now()
-        next_run = (now + timedelta(days=1)).replace(
+        tomorrow = now + timedelta(days=1)
+        next_midnight = tomorrow.replace(
             hour=0,
             minute=0,
             second=0,
             microsecond=0,
         )
 
-        await asyncio.sleep(max(1, (next_run - now).total_seconds()))
+        wait_seconds = (next_midnight - now).total_seconds()
+
+        await asyncio.sleep(wait_seconds)
 
         try:
             await run_daily_cleanup()
