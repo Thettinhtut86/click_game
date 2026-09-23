@@ -28,7 +28,7 @@ async def test_run_daily_cleanup(monkeypatch):
             }
         )
 
-    def fake_clear(self):
+    def fake_clear():
         nonlocal clear_called
         clear_called = True
 
