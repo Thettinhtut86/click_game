@@ -1,5 +1,3 @@
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
 from click_game.services import cleanup_service
@@ -17,7 +15,13 @@ async def test_run_daily_cleanup(monkeypatch):
             nonlocal chat_cleanup_called
             chat_cleanup_called = True
 
-    def fake_execute(query, params=None, fetch=None, dictionary=None, commit=False):
+    def fake_execute(
+        query,
+        params=None,
+        fetch=False,
+        dictionary=False,
+        commit=False,
+    ):
         execute_calls.append(
             {
                 "query": query,
@@ -46,11 +50,13 @@ async def test_run_daily_cleanup(monkeypatch):
         "execute",
         fake_execute,
     )
+
     monkeypatch.setattr(
         cleanup_service.room_store,
         "clear",
         fake_clear,
     )
+
     monkeypatch.setattr(
         cleanup_service.websocket_manager,
         "broadcast",
@@ -58,8 +64,9 @@ async def test_run_daily_cleanup(monkeypatch):
     )
 
     await cleanup_service.run_daily_cleanup()
-    
+
     assert chat_cleanup_called is True
+
     assert execute_calls == [
         {
             "query": "DELETE FROM players WHERE created_at < CURDATE()",
@@ -69,5 +76,9 @@ async def test_run_daily_cleanup(monkeypatch):
             "commit": True,
         }
     ]
+
     assert clear_called is True
-    assert broadcast_calls == [{"action": "chat_reset"}]
+
+    assert broadcast_calls == [
+        {"action": "chat_reset"}
+    ]
