@@ -69,7 +69,7 @@ async def test_run_daily_cleanup(monkeypatch):
 
     assert execute_calls == [
         {
-            "query": "DELETE FROM players WHERE created_at < CURDATE()",
+            "query": "DELETE FROM players WHERE joined_at < CURDATE()",
             "params": None,
             "fetch": False,
             "dictionary": False,
