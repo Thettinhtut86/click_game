@@ -9,8 +9,8 @@ from click_game.db.database import execute
 
 async def run_daily_cleanup():
     ChatService().cleanup()
-    
-    execute("DELETE FROM players WHERE created_at < CURDATE()", commit=True)
+
+    execute("DELETE FROM players WHERE joined_at < CURDATE()", commit=True)
 
     room_store.clear()
 
