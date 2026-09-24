@@ -1,23 +1,38 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
-
+import { Subject } from 'rxjs';
 import { Room } from './room';
 
 describe('Room', () => {
   let component: Room;
-  let fixture: ComponentFixture<Room>;
+  let messages$: Subject<any>;
+  let ws: any;
+  let router: any;
+  let cd: any;
 
-  beforeEach(async () => {
-    await TestBed.configureTestingModule({
-      declarations: [Room]
-    })
-    .compileComponents();
+  beforeEach(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem('playerId', '1');
+    sessionStorage.setItem('playerName', 'Alice');
+    sessionStorage.setItem('roomId', 'room-1');
 
-    fixture = TestBed.createComponent(Room);
-    component = fixture.componentInstance;
-    fixture.detectChanges();
+    messages$ = new Subject<any>();
+    ws = { messages$, send: jasmine.createSpy('send') };
+    router = { navigate: jasmine.createSpy('navigate') };
+    cd = { detectChanges: jasmine.createSpy('detectChanges') };
+
+    component = new Room({ snapshot: { params: { id: 'room-1' } } } as any, router, ws);
   });
 
-  it('should create', () => {
+  afterEach(() => sessionStorage.clear());
+
+  it('creates successfully', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('handles a room closed message by returning to the menu', () => {
+    component.ngOnInit();
+    messages$.next({ action: 'room_closed', message: 'Closed' });
+
+    expect(router.navigate).toHaveBeenCalledWith(['/join-room']);
+    component.ngOnDestroy();
   });
 });

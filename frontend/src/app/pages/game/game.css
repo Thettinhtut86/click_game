@@ -23,7 +23,31 @@
     border-radius: 0.8rem;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
+.game-message {
+    position: fixed;
+    top: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    padding: 0.8rem 1.5rem;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    max-width: 90%;
+}
 
+.wrong-message {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+}
+
+.delay-message {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
 .players-container {
     display: flex;
     gap: 0.6rem;

@@ -24,6 +24,14 @@
             <button class="quit-btn" (click)="quitGame()">Quit Game</button>
 
         </div>
+        <div 
+            *ngIf="errorMessage" 
+            class="game-message" 
+            [class.wrong-message]="errorMessageType === 'wrong'"
+            [class.delay-message]="errorMessageType === 'delay'"
+        > 
+            {{ errorMessage }} 
+        </div>
 
         <!-- GRID -->
         <div class="grid-container">

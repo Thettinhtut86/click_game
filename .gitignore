@@ -50,6 +50,9 @@ node_modules/
 dist/
 **/dist/
 
+frontend/FRONTEND_TESTING.md
+frontend/.gitignore
+
 # =====================================
 # IDE
 # =====================================
@@ -88,3 +91,4 @@ pip-wheel-metadata/
 *.sqlite
 *.sqlite3
 *.db
+
