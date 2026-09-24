@@ -62,7 +62,7 @@ class GameService:
                 "status": "click_delayed",
                 "message": (
                     f"Click delayed. "
-                    f"Try again in {remaining:1f} seconds."
+                    f"Try again in {remaining:.1f} seconds."
                 ),
                 "remaining": round(remaining, 1),
             }
