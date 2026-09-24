@@ -53,10 +53,19 @@ def test_expected_bubble_after_game():
 
 def test_select_bubble():
     service = GameService()
+
     room = {"option": "asc"}
     service.start(room)
-    finished = service.select_bubble(room, "1", "B1", "#fff")
-    assert finished is False
+
+    result = service.select_bubble(
+        room,
+        "1",
+        "B1",
+        "#fff",
+    )
+
+    assert result["status"] == "correct"
+    assert result["finished"] is False
     assert room["index"] == 1
     assert room["bubbles"]["B1"]["uid"] == "1"
     assert room["bubbles"]["B1"]["color"] == "#fff"
@@ -64,10 +73,63 @@ def test_select_bubble():
 
 def test_select_wrong_bubble():
     service = GameService()
+
     room = {"option": "asc"}
     service.start(room)
-    with pytest.raises(ValueError, match="must click B1"):
-        service.select_bubble(room, "1", "B100", "#fff")
+
+    result = service.select_bubble(
+        room,
+        "1",
+        "B100",
+        "#fff",
+    )
+
+    assert result["status"] == "wrong_bubble"
+    assert result["wrong_clicks"] == 1
+    assert result["expected"] == "B1"
+    assert result["message"] == ("You must click B1 next! Wrong clicks: 1/3")
+
+
+def test_three_wrong_clicks_trigger_delay():
+    service = GameService()
+
+    room = {"option": "asc"}
+    service.start(room)
+
+    result = service.select_bubble(room, "1", "B100", "#fff")
+    assert result["status"] == "wrong_bubble"
+    assert result["wrong_clicks"] == 1
+
+    result = service.select_bubble(room, "1", "B99", "#fff")
+    assert result["status"] == "wrong_bubble"
+    assert result["wrong_clicks"] == 2
+
+    result = service.select_bubble(room, "1", "B98", "#fff")
+    assert result["status"] == "click_delayed"
+    assert result["remaining"] == 3
+    assert result["message"] == ("Too many wrong clicks. Click delayed for 3 seconds.")
+
+
+def test_click_is_blocked_during_delay():
+    service = GameService()
+
+    room = {"option": "asc"}
+    service.start(room)
+
+    service.select_bubble(room, "1", "B100", "#fff")
+    service.select_bubble(room, "1", "B99", "#fff")
+    service.select_bubble(room, "1", "B98", "#fff")
+
+    result = service.select_bubble(
+        room,
+        "1",
+        "B1",
+        "#fff",
+    )
+
+    assert result["status"] == "click_delayed"
+    assert result["remaining"] > 0
+    assert "Click delayed" in result["message"]
 
 
 def test_select_after_game_is_over():
