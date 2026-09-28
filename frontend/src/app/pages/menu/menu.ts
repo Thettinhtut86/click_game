@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, HostListener, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { WebSocket } from '../../services/web-socket';
 import { ApiService } from '../../services/api.service';
@@ -16,7 +16,11 @@ export class Menu implements OnInit {
   name!: string;
   color!: string;
   unreadCount = 0;
-  bubbles:any[] = [];
+  bubbles: any[] = [];
+  
+  selectedIndex = 0;
+  totalMenuItems = 4;
+
   constructor(private ws:WebSocket,private router:Router, private api: ApiService, private cursorService:CursorService){}
 
   ngOnInit() {
@@ -44,6 +48,30 @@ export class Menu implements OnInit {
 
   });
 }
+
+  @HostListener('window:keydown', ['$event'])
+  handleKeyboardEvent(event: KeyboardEvent) {
+    if (event.key === 'ArrowDown') {
+      this.selectedIndex = (this.selectedIndex + 1) % this.totalMenuItems;
+      event.preventDefault();
+    } else if (event.key === 'ArrowUp') {
+      this.selectedIndex = (this.selectedIndex - 1 + this.totalMenuItems) % this.totalMenuItems;
+      event.preventDefault();
+    } else if (event.key === 'Enter') {
+      this.triggerSelectedAction();
+      event.preventDefault();
+    }
+  }
+
+  // Execute action based on current selected index
+  triggerSelectedAction() {
+    switch (this.selectedIndex) {
+      case 0: this.createRoom(); break;
+      case 1: this.joinRoom(); break;
+      case 2: this.allChat(); break;
+      case 3: this.logout(); break;
+    }
+  }
 
   createRoom() { this.router.navigate(['/create']); }
   joinRoom() { this.router.navigate(['/join']); }

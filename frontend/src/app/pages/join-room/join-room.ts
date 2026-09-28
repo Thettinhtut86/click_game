@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 
@@ -32,55 +32,67 @@ export class JoinRoom implements OnInit, OnDestroy {
 
   constructor(
     private ws: WebSocket,
-    private api: ApiService,
-    private router: Router
+    private router: Router,
+    private cd: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
-    // INITIAL LOAD
-    this.loadRooms();
+
+    this.loading = true;
+    
     // LIVE WS UPDATES
     this.sub = this.ws.messages$.subscribe(msg => {
       if (!msg) return;
       // FULL ROOM LIST UPDATE
-      if (msg.action === 'rooms_update') {
-        this.rooms = (msg.rooms || []).filter(
-          (r: Room) => r.player_count < 4
-        );
-        this.loading = false;
-      }
-      // ROOM CLOSED
-      if (msg.action === 'room_closed') {
-        this.rooms = this.rooms.filter(
-          r => r.id != msg.roomId
-        );
+      switch (msg.action) {
+
+        case 'rooms_update':
+          this.rooms = [...(msg.rooms || [])]
+            .filter((r: any) => Number(r.player_count || 0) < 4);
+          this.loading = false;
+
+          queueMicrotask(() => {
+            this.cd.detectChanges();
+          });
+          break;
+        
+
+        case 'room_closed':
+          this.rooms = this.rooms.filter(r => r.id !== Number(msg.roomId));
+          break;
+
+        case 'join_ack':
+          sessionStorage.setItem('roomId',msg.roomId.toString());
+          this.router.navigate(['/room',msg.roomId]);
+          break;
+
+        case 'watcher_joined':
+          this.router.navigate(['/room',msg.roomId]);
+          break;
+        
+        case 'room_created':
+          this.router.navigate(['/room',msg.roomId]);
+
+          break;
+
+        case 'error':
+          alert(msg.message || 'Operation failed');
+          break;
       }
     });
+    this.ws.requestRooms();
   }
 
+  trackByRoomId(index: number, room: Room) {
+    return room.id;
+  }
   ngOnDestroy() {
     this.sub?.unsubscribe();
-  }
-
-  loadRooms() {
-    this.loading = true;
-    this.api.listRooms().subscribe({
-      next: (res: Room[]) => {
-        this.rooms = res.filter(
-          r => r.player_count < 4
-        );
-        this.loading = false;
-      },
-      error: () => {
-        this.loading = false;
-      }
-    });
   }
 
   join(roomId: number) {
 
     this.ws.joinRoom(roomId.toString());
-    this.router.navigate(['/room', roomId]);
   }
 
   back() {

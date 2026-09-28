@@ -1,29 +1,42 @@
-import { TestBed } from '@angular/core/testing';
-import { RouterModule } from '@angular/router';
+import { Subject } from 'rxjs';
 import { App } from './app';
 
+import { NavigationEnd } from '@angular/router';
+
 describe('App', () => {
-  beforeEach(async () => {
-    await TestBed.configureTestingModule({
-      imports: [
-        RouterModule.forRoot([])
-      ],
-      declarations: [
-        App
-      ],
-    }).compileComponents();
+  it('tracks websocket connection state', () => {
+    const states$ = new Subject<any>();
+    const ws: any = { connectionState$: states$ };
+    const router: any = {
+      events: new Subject<any>(),
+      routerState: { root: { firstChild: { snapshot: { data: {} } } } },
+    };
+
+    const component = new App(ws, router);
+    component.ngOnInit();
+
+    states$.next('connected');
+    expect(component.state).toBe('connected');
+
+    states$.next('disconnected');
+    expect(component.state).toBe('disconnected');
   });
 
-  it('should create the app', () => {
-    const fixture = TestBed.createComponent(App);
-    const app = fixture.componentInstance;
-    expect(app).toBeTruthy();
-  });
+  it('shows the reconnect overlay on non-login routes', () => {
+    const states$ = new Subject<any>();
+    const events$ = new Subject<any>();
+    const ws: any = { connectionState$: states$ };
+    const router: any = {
+      events: events$,
+      routerState: {
+        root: { firstChild: { snapshot: { data: { hideOverlay: false } } } },
+      },
+    };
 
-  it('should render title', () => {
-    const fixture = TestBed.createComponent(App);
-    fixture.detectChanges();
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, click-game');
+    const component = new App(ws, router);
+    component.ngOnInit();
+    events$.next(new NavigationEnd(1, '/menu', '/menu'));
+
+    expect(component.isLoginPage).toBeFalse();
   });
 });

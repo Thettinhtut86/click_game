@@ -20,6 +20,20 @@ export class WebSocket {
 
   public connectionState$ = new Subject<'connected' | 'connecting' | 'disconnected'>();
 
+  constructor() {
+    this.restoreConnection();
+  }
+  private restoreConnection() {
+    const token = sessionStorage.getItem('token');
+    const userName = sessionStorage.getItem('playerName');
+    const userId = sessionStorage.getItem('playerId');
+
+    // If session data exists, we survived a refresh. Reconnect immediately.
+    if (token && userName) {
+      this.connect(userName, token, userId || undefined);
+    }
+  }
+
   connect(userName: string, token: string, userId?: string) {
     if (this.connected || this.connecting) return;
     
@@ -39,7 +53,7 @@ export class WebSocket {
 
     this.socket = webSocket({
 
-    url: `ws://192.168.250.1:8000/ws?token=${token}`,
+    url: `ws://192.168.250.3:8000/ws?token=${token}`,
 
       serializer: (msg: any) => JSON.stringify(msg),
       deserializer: ({ data }) => JSON.parse(data),
@@ -50,10 +64,10 @@ export class WebSocket {
 
           this.connected = true;
           this.connecting = false;
-
           this.reconnectAttempts = 0;
-
           this.connectionState$.next('connected');
+          
+          this.send({ action: 'handshake', userName: this.userName });
         }
       },
 
@@ -106,11 +120,15 @@ send(data: any) {
     this.socket?.complete();
   }
 
-  createRoom(roomId: string, option: 'asc' | 'desc' = 'asc') {
+  createRoom(option: 'asc' | 'desc' = 'asc') {
+    console.log("userId: ", this.userId);
+    console.log("userName: ", this.userName);
+    console.log();
     this.send({
       action: 'create_room',
-      roomId,
-      option
+      option,
+      userId: this.userId,      
+      userName: this.userName
     });
   }
 
@@ -121,6 +139,12 @@ send(data: any) {
     });
   }
 
+  requestRooms() {
+    const msg = { action: 'get_rooms' };
+    // console.log("SEND WS:", msg);
+    this.send(msg);
+  }
+
   leaveRoom(roomId: string) {
     this.send({
       action: 'leave_room',
@@ -129,10 +153,12 @@ send(data: any) {
   }
 
   startGame(roomId: string) {
-    this.send({
+    const msg = {
       action: 'start_game',
       roomId
-    });
+     };
+    // console.log("SEND WS:", msg);    
+    this.send(msg);
   }
 
   selectBubble(roomId: string, bubbleId: string) {
